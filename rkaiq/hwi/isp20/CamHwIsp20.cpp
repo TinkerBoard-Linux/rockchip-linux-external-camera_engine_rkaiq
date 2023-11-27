@@ -168,7 +168,6 @@ out:
 static XCamReturn get_sensor_caps(rk_sensor_full_info_t *sensor_info) {
     struct v4l2_subdev_frame_size_enum fsize_enum;
     struct v4l2_subdev_mbus_code_enum  code_enum;
-    std::vector<uint32_t> formats;
     rk_frame_fmt_t frameSize;
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
@@ -187,6 +186,7 @@ static XCamReturn get_sensor_caps(rk_sensor_full_info_t *sensor_info) {
     sensor_info->len_name = std::string(minfo->base.lens);
 
 #if 0
+    std::vector<uint32_t> formats;
     memset(&code_enum, 0, sizeof(code_enum));
     while (vdev.io_control(VIDIOC_SUBDEV_ENUM_MBUS_CODE, &code_enum) == 0) {
         formats.push_back(code_enum.code);
@@ -223,8 +223,9 @@ static XCamReturn get_sensor_caps(rk_sensor_full_info_t *sensor_info) {
         sensor_info->frame_size.push_back(frameSize);
         fie.index++;
     }
-    if (fie.index == 0)
-        LOGE_CAMHW_SUBM(ISP20HW_SUBM, "@%s %s: Enum sensor frame interval failed", __FUNCTION__, sensor_info->device_name.c_str());
+    if (fie.index == 0) {
+        LOGW_CAMHW_SUBM(ISP20HW_SUBM, "@%s %s: Enum sensor frame interval failed", __FUNCTION__, sensor_info->device_name.c_str());
+    }
     vdev.close();
 
     return ret;
@@ -1401,11 +1402,11 @@ CamHwIsp20::getBindedSnsEntNmByVd(const char* vd)
                     (strstr(s_full_info->sensor_name.c_str(), "_s_") == NULL)) {
                 FILE *fp = NULL;
                 struct media_device *device = NULL;
-                uint32_t nents, j = 0, i = 0;
+                uint32_t j = 0, i = 0;
                 const struct media_entity_desc *entity_info = NULL;
                 struct media_entity *entity = NULL;
                 media_pad *src_pad_s = NULL;
-                char sys_path[64], devpath[32];
+                char sys_path[64];
 
                 snprintf (sys_path, 64, "/dev/media%d", s_full_info->media_node_index);
                 if (0 != access(sys_path, F_OK))
@@ -1738,7 +1739,7 @@ CamHwIsp20::poll_buffer_ready (SmartPtr<VideoBuffer> &buf)
             if (data->frame_id == 0) {
                 ++frame_id0_cnt;
             }
-            LOGE("<TB> poll param id %d cnt %d", data->frame_id, frame_id0_cnt);
+            LOGK_CAMHW("<TB> poll param id %d cnt %d", data->frame_id, frame_id0_cnt);
         }
         if (!mTbInfo.is_pre_aiq && frame_id0_cnt < 1) {
             return XCAM_RETURN_NO_ERROR;
@@ -2971,6 +2972,8 @@ CamHwIsp20::start()
     if (mParamsAssembler->ready())
         setIspConfig();
 #endif
+    LOGK_CAMHW("cid[%d] %s success. isGroup:%d, isOnline:%d, isMultiIsp:%d, init_ens:0x%llx",
+              mCamPhyId, __func__, mIsGroupMode, mNoReadBack, mIsMultiIspMode, _isp_module_ens);
     EXIT_CAMHW_FUNCTION();
     return ret;
 }
@@ -3629,6 +3632,7 @@ CamHwIsp20::showOtpPdafData(struct rkmodule_pdaf_inf *otp_pdaf)
             }
             LOGI_CAMHW_SUBM(ISP20HW_SUBM, "%s", print_buf);
         }
+        LOGI_CAMHW_SUBM(ISP20HW_SUBM, "pd_offset=0x%x;", otp_pdaf->pd_offset);
     }
 
     return XCAM_RETURN_NO_ERROR;
@@ -3983,6 +3987,25 @@ CamHwIsp20::setAngleZ(float angleZ)
 }
 
 XCamReturn
+CamHwIsp20::getFocusPosition(int& position)
+{
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    ENTER_CAMHW_FUNCTION();
+    SmartPtr<LensHw> mLensSubdev = mLensDev.dynamic_cast_ptr<LensHw>();
+
+    if (mLensSubdev.ptr()) {
+        if (mLensSubdev->getFocusParams(&position) < 0) {
+            LOGE_CAMHW_SUBM(ISP20HW_SUBM, "get focus position failed to device");
+            return XCAM_RETURN_ERROR_IOCTL;
+        }
+        LOGD_CAMHW_SUBM(ISP20HW_SUBM, "|||get focus position: %d", position);
+    }
+
+    EXIT_CAMHW_FUNCTION();
+    return ret;
+}
+
+XCamReturn
 CamHwIsp20::setCpslParams(SmartPtr<RkAiqCpslParamsProxy>& cpsl_params)
 {
     ENTER_CAMHW_FUNCTION();
@@ -4044,8 +4067,9 @@ CamHwIsp20::getEffectiveIspParams(rkisp_effect_params_v20& ispParams, uint32_t f
     SmartLock locker (_isp_params_cfg_mutex);
 
     if (_effecting_ispparam_map.size() == 0) {
-        LOGE_CAMHW_SUBM(ISP20HW_SUBM, "camId: %d, can't search id %d,  _effecting_exp_mapsize is %d\n",
-                        mCamPhyId, frame_id, _effecting_ispparam_map.size());
+        if (frame_id != 0 && _state == CAM_HW_STATE_STARTED)
+            LOGE_CAMHW_SUBM(ISP20HW_SUBM, "camId: %d, can't search id %d,  _effecting_ispparam_map is %d\n",
+                            mCamPhyId, frame_id, _effecting_ispparam_map.size());
         return  XCAM_RETURN_ERROR_PARAM;
     }
 
@@ -4868,12 +4892,14 @@ XCamReturn CamHwIsp20::setSensorCrop(rk_aiq_rect_t& rect)
         V4l2Device* mipi_tx = mRawCapUnit->get_tx_device(i).get_cast_ptr<V4l2Device>();
         memset(&crop, 0, sizeof(crop));
         crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ret = mipi_tx->get_crop(crop);
-        crop.c.left = rect.left;
-        crop.c.top = rect.top;
-        crop.c.width = rect.width;
-        crop.c.height = rect.height;
-        ret = mipi_tx->set_crop(crop);
+        if (mipi_tx) {
+            ret = mipi_tx->get_crop(crop);
+            crop.c.left = rect.left;
+            crop.c.top = rect.top;
+            crop.c.width = rect.width;
+            crop.c.height = rect.height;
+            ret = mipi_tx->set_crop(crop);
+        }
     }
     _crop_rect = rect;
 #endif
@@ -5799,11 +5825,11 @@ CamHwIsp20::setIspConfig(cam3aResultList* result_list)
         isp_params->module_en_update  = 0;
         isp_params->module_cfg_update = 0;
         isp_params->module_ens = 0;
-        if (merge_isp_results(ready_results, isp_params) != XCAM_RETURN_NO_ERROR)
+        if (merge_isp_results(ready_results, isp_params, mIsMultiIspMode) != XCAM_RETURN_NO_ERROR)
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "ISP parameter translation error\n");
 
         if (isp_params->module_cfg_update == 0 &&
-            isp_params->module_en_update) {
+            isp_params->module_en_update == 0) {
             mIspParamsDev->return_buffer_to_pool(v4l2buf);
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "no new ISP parameters to drv");
             return ret;
@@ -5833,6 +5859,14 @@ CamHwIsp20::setIspConfig(cam3aResultList* result_list)
         }
 #endif
 
+#if defined(RKAIQ_HAVE_MULTIISP) && defined(ISP_HW_V32)
+        struct isp32_isp_params_cfg ori_params;
+        if (mIsMultiIspMode) {
+            ori_params = *isp_params;
+            mParamsSplitter->SplitIspParams(&ori_params, isp_params);
+        }
+#endif
+
 #if defined(RKAIQ_ENABLE_SPSTREAM)
         if (mAfParams) {
             RkAiqIspAfParamsProxy* afParams =
@@ -5843,7 +5877,7 @@ CamHwIsp20::setIspConfig(cam3aResultList* result_list)
         }
 #endif
 
-#if defined(RKAIQ_HAVE_MULTIISP) && defined(ISP_HW_V30)
+#if defined(RKAIQ_HAVE_MULTIISP) && (defined(ISP_HW_V30) || defined(ISP_HW_V32))
         if (mIsMultiIspMode)
             updateEffParams(isp_params, &ori_params);
         else
@@ -5873,13 +5907,16 @@ CamHwIsp20::setIspConfig(cam3aResultList* result_list)
 #ifdef DISABLE_PARAMS_POLL_THREAD
         int timeout = is_wait_params_done ? 100 : 1;
         int buf_counts = mIspParamsDev->get_buffer_count ();
+        int try_time = 3;
         while (mIspParamsDev->get_queued_bufcnt() > 2 || is_wait_params_done) {
             if (mIspParamsDev->poll_event (timeout, -1) <= 0) {
                 LOGW_CAMHW_SUBM(ISP20HW_SUBM, "poll params error, queue cnts: %d !",
                                 mIspParamsDev->get_queued_bufcnt());
-                if (mIspParamsDev->get_queued_bufcnt() == buf_counts)
-                   timeout = 100 ;
-                else
+                if (mIspParamsDev->get_queued_bufcnt() == buf_counts && try_time > 0) {
+                   timeout = 30;
+                   try_time--;
+                   continue;
+                } else
                     break;
             }
             SmartPtr<V4l2Buffer> buf;
@@ -5893,7 +5930,7 @@ CamHwIsp20::setIspConfig(cam3aResultList* result_list)
                     SmartPtr<VideoBuffer> video_buf = new V4l2BufferProxy (buf, mIspParamsDev);
                     video_buf->_buf_type = ISP_POLL_PARAMS;
 
-                    LOGE("<TB> poll param id:%d, call err_cb", frameId);
+                    LOGK_CAMHW("<TB> poll param id:%d, call err_cb", frameId);
                     CamHwBase::poll_buffer_ready(video_buf);
                 }
                 mIspParamsDev->return_buffer_to_pool(buf);
@@ -6024,7 +6061,7 @@ bool CamHwIsp20::get_pdaf_support()
 void CamHwIsp20::notify_isp_stream_status(bool on)
 {
     if (on) {
-        LOGI_CAMHW_SUBM(ISP20HW_SUBM, "camId:%d, %s on", mCamPhyId, __func__);
+        LOGK_CAMHW_SUBM(ISP20HW_SUBM, "camId:%d, %s on", mCamPhyId, __func__);
         XCamReturn ret = hdr_mipi_start_mode(_hdr_mode);
         if (ret < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "hdr mipi start err: %d\n", ret);
@@ -6051,7 +6088,7 @@ void CamHwIsp20::notify_isp_stream_status(bool on)
             }
         }
     } else {
-        LOGI_CAMHW_SUBM(ISP20HW_SUBM, "camId:%d, %s off", mCamPhyId, __func__);
+        LOGK_CAMHW_SUBM(ISP20HW_SUBM, "camId:%d, %s off", mCamPhyId, __func__);
         _isp_stream_status = ISP_STREAM_STATUS_STREAM_OFF;
         // if CIFISP_V4L2_EVENT_STREAM_STOP event is listened, isp driver
         // will wait isp params streaming off

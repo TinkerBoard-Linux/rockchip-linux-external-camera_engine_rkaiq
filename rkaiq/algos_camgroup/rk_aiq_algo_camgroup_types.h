@@ -42,10 +42,12 @@ typedef struct rk_aiq_singlecam_3a_result_s {
         XCamVideoBuffer* _aePreRes;
         RKAiqAecExpInfo_t _effAecExpInfo;
         bool _bEffAecExpValid;
+        RkAiqSetStatsCfg stats_cfg_to_trans;
+        bool aec_run_flag;
     } aec;
     // awb params
     struct {
-        union{
+        union {
             rk_aiq_wb_gain_t* _awbGainParams;
             rk_aiq_wb_gain_v32_t* _awbGainV32Params;
         };
@@ -56,7 +58,7 @@ typedef struct rk_aiq_singlecam_3a_result_s {
             rk_aiq_isp_awb_meas_cfg_v3x_t* _awbCfgV3x;
         };
         XCamVideoBuffer* _awbStats;
-        XCamVideoBuffer* _awbProcRes;
+        RkAiqAlgoProcResAwbShared_t _awbProcRes;
     } awb;
     rk_aiq_lsc_cfg_t* _lscConfig;
     AdpccProcResult_t* _dpccConfig;

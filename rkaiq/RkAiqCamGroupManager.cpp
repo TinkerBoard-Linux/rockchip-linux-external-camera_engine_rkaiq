@@ -79,7 +79,7 @@ RkAiqCamGroupManager::RkAiqCamGroupManager()
     mRequiredMsgsMask |= (1ULL << XCAM_MESSAGE_AEC_STATS_OK) | (1ULL << XCAM_MESSAGE_AE_PRE_RES_OK);
 #endif
 #if RKAIQ_HAVE_AWB_V20 | RKAIQ_HAVE_AWB_V21 | RKAIQ_HAVE_AWB_V32
-    mRequiredMsgsMask |= (1ULL << XCAM_MESSAGE_AWB_STATS_OK) | (1ULL << XCAM_MESSAGE_AWB_PROC_RES_OK);
+    mRequiredMsgsMask |= (1ULL << XCAM_MESSAGE_AWB_STATS_OK);
 #endif
 
     mGroupAlgosDesArray = g_camgroup_algos;
@@ -401,7 +401,7 @@ RkAiqCamGroupManager::processAiqCoreMsgs(RkAiqCore* src, RkAiqCoreVdBufMsg& msg)
         singleCamRes->_3aResults.awb._awbStats = convert_to_XCamVideoBuffer(vdBufMsg->msg);
         break;
     case XCAM_MESSAGE_AWB_PROC_RES_OK:
-        singleCamRes->_3aResults.awb._awbProcRes = convert_to_XCamVideoBuffer(vdBufMsg->msg);
+        //singleCamRes->_3aResults.awb._awbProcRes = convert_to_XCamVideoBuffer(vdBufMsg->msg);
         break;
     case XCAM_MESSAGE_AEC_STATS_OK:
         singleCamRes->_3aResults.aec._aecStats = convert_to_XCamVideoBuffer(vdBufMsg->msg);
@@ -453,7 +453,7 @@ RkAiqCamGroupManager::RelayAiqCoreResults(RkAiqCore* src, SmartPtr<RkAiqFullPara
 
 #define SET_TO_CAMGROUP(lc, BC) \
     if (aiqParams->m##lc##Params.ptr()) { \
-        frame_id = aiqParams->m##lc##Params->data()->frame_id; \
+        frame_id = aiqParams->mFrmId; \
         rk_aiq_groupcam_result_t* camGroupRes = getGroupCamResult(frame_id); \
         if (!camGroupRes) { \
             LOGW_CAMGROUP("camgroup: get cam result faild for type:%s, camId: %d, frame: %d", #BC, camId, frame_id); \
@@ -991,7 +991,6 @@ RkAiqCamGroupManager::reProcess(rk_aiq_groupcam_result_t* gc_res)
     // assume all single cam runs same algos
     RkAiqManager* aiqManager = (mBindAiqsMap.begin())->second;
     RkAiqCore* aiqCore = aiqManager->mRkAiqAnalyzer.ptr();
-    RkAiqCore::RkAiqAlgosComShared_t* sharedCom = &aiqCore->mAlogsComSharedParams;
 
     LOGD_CAMGROUP("camgroup: set reprocess params ... ");
 
@@ -1023,6 +1022,11 @@ RkAiqCamGroupManager::reProcess(rk_aiq_groupcam_result_t* gc_res)
                 scam_3a_res->aec.exp_tbl = aiqParams->mExposureParams->data()->result.ae_proc_res_rk.exp_set_tbl;
                 scam_3a_res->aec.exp_tbl_size = &aiqParams->mExposureParams->data()->result.ae_proc_res_rk.exp_set_cnt;
                 scam_3a_res->aec.exp_i2c_params = &aiqParams->mExposureParams->data()->result.exp_i2c_params;
+                if (mInit) {
+                    scam_3a_res->aec._effAecExpInfo =
+                        aiqParams->mExposureParams->data()->result.ae_proc_res_rk.exp_set_tbl[0];
+                    scam_3a_res->aec._bEffAecExpValid = true;
+                }
             } else {
                 LOGW_CAMGROUP("camId:%d, framId:%u, exp is null", i, gc_res->_frameId);
                 // frame 1,2 exp may be null now
@@ -1403,7 +1407,6 @@ RkAiqCamGroupManager::enableAlgo(int algoType, int id, bool enable)
         if (mState >= CAMGROUP_MANAGER_PREPARED) {
             RkAiqManager* aiqManager = (mBindAiqsMap.begin())->second;
             RkAiqCore* aiqCore = aiqManager->mRkAiqAnalyzer.ptr();
-            RkAiqCore::RkAiqAlgosComShared_t* sharedCom = &aiqCore->mAlogsComSharedParams;
             it->second->prepare(aiqCore);
         }
     }

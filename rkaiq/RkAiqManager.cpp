@@ -491,6 +491,7 @@ RkAiqManager::updateCalibDb(const CamCalibDbV2Context_t* newCalibDb)
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
     auto update_list = std::make_shared<std::list<std::string>>();
     update_list->push_back("colorAsGrey");
+    update_list->push_back("ALL");
 
     *mCalibDbV2 = *(CamCalibDbV2Context_t*)newCalibDb;
     mCamHw->setCalib(newCalibDb);
@@ -549,7 +550,7 @@ RkAiqManager::hwResCb(SmartPtr<VideoBuffer>& hwres)
             uint32_t seq = -1;
             seq = hwres.dynamic_cast_ptr<VideoBuffer>()->get_sequence();
             if (seq == 0 && mTBStatsCnt == 0) {
-                LOGE("<TB> tb hwResCb stats %d\n", seq);
+                LOGK("<TB> tb hwResCb stats %d\n", seq);
                 struct timespec tp;
                 clock_gettime(CLOCK_MONOTONIC_RAW, &tp);
 
@@ -558,7 +559,7 @@ RkAiqManager::hwResCb(SmartPtr<VideoBuffer>& hwres)
                 SmartPtr<ispHwEvt_t> hw_evt = mCamHwIsp20->make_ispHwEvt(
                                                   0, V4L2_EVENT_FRAME_SYNC,
                                                   tp.tv_sec * 1000 * 1000 * 1000 + tp.tv_nsec);
-                LOGE("<TB> push sof %d\n", seq);
+                LOGK("<TB> push sof %d\n", seq);
                 mRkAiqAnalyzer->pushEvts(hw_evt);
             }
 
@@ -578,6 +579,16 @@ RkAiqManager::hwResCb(SmartPtr<VideoBuffer>& hwres)
         msg.err_code = XCAM_RETURN_BYPASS;
         if (mTbInfo.is_pre_aiq && mErrCb)
             (*mErrCb)(&msg);
+        if (mHwEvtCb) {
+            rk_aiq_hwevt_t hwevt;
+
+            memset(&hwevt, 0, sizeof(hwevt));
+            hwevt.cam_id = mCamHw->getCamPhyId();
+            hwevt.aiq_status = RK_AIQ_STATUS_PREAIQ_DONE;
+            hwevt.ctx = mHwEvtCbCtx;
+
+            (*mHwEvtCb)(&hwevt);
+        }
     } else if (hwres->_buf_type == ISPP_POLL_NR_STATS) {
         ret = mRkAiqAnalyzer->pushStats(hwres);
     } else if (hwres->_buf_type == ISP_POLL_SOF) {
@@ -592,7 +603,7 @@ RkAiqManager::hwResCb(SmartPtr<VideoBuffer>& hwres)
             xcam_get_runtime_log_level();
 
         if (mTbInfo.is_pre_aiq) {
-            LOGE("<TB> skip real sof %d\n", evtdata->_frameid);
+            LOGI("<TB> skip real sof %d\n", evtdata->_frameid);
             return ret;
         }
         mRkAiqAnalyzer->pushEvts(hw_evt);

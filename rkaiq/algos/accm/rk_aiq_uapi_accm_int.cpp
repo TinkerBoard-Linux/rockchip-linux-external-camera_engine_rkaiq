@@ -1,5 +1,6 @@
 #include "rk_aiq_uapi_accm_int.h"
 #include "accm/rk_aiq_types_accm_algo_prvt.h"
+#include "accm/rk_aiq_accm_algo.h"
 
 #if RKAIQ_HAVE_CCM_V1
 XCamReturn
@@ -21,10 +22,6 @@ rk_aiq_uapi_accm_GetAttrib(const RkAiqAlgoContext *ctx,
 {
 
     accm_context_t* ccm_contex = (accm_context_t*)ctx->accm_para;
-    memcpy(ccm_contex->mCurAtt.stManual.ccMatrix, ccm_contex->ccmHwConf.matrix, sizeof(ccm_contex->ccmHwConf.matrix));
-    memcpy(ccm_contex->mCurAtt.stManual.ccOffsets, ccm_contex->ccmHwConf.offs, sizeof(ccm_contex->ccmHwConf.offs));
-    memcpy(ccm_contex->mCurAtt.stManual.y_alpha_curve, ccm_contex->ccmHwConf.alp_y, sizeof(ccm_contex->ccmHwConf.alp_y));
-    ccm_contex->mCurAtt.stManual.low_bound_pos_bit = ccm_contex->ccmHwConf.bound_bit;
 
     memcpy(attr, &ccm_contex->mCurAtt, sizeof(rk_aiq_ccm_attrib_t));
 
@@ -68,25 +65,12 @@ rk_aiq_uapi_accm_v2_GetAttrib(const RkAiqAlgoContext *ctx,
 
     accm_context_t* ccm_contex = (accm_context_t*)ctx->accm_para;
 
-    memcpy(ccm_contex->mCurAttV2.stManual.ccMatrix, ccm_contex->ccmHwConf_v2.matrix,
-            sizeof(float)*9);
-    memcpy(ccm_contex->mCurAttV2.stManual.ccOffsets, ccm_contex->ccmHwConf_v2.offs,
-            sizeof(float)*3);
-    memcpy(ccm_contex->mCurAttV2.stManual.y_alpha_curve, ccm_contex->ccmHwConf_v2.alp_y,
-            sizeof(float)*CCM_CURVE_DOT_NUM_V2);
-    memcpy(ccm_contex->mCurAttV2.stManual.enh_rgb2y_para, ccm_contex->ccmHwConf_v2.enh_rgb2y_para,
-            sizeof(unsigned char)*3);
-    ccm_contex->mCurAttV2.stManual.enh_adj_en  = ccm_contex->ccmHwConf_v2.enh_adj_en;
-    ccm_contex->mCurAttV2.stManual.enh_rat_max = ccm_contex->ccmHwConf_v2.enh_rat_max;
-    ccm_contex->mCurAttV2.stManual.highy_adj_en  = ccm_contex->ccmHwConf_v2.highy_adj_en;
-    ccm_contex->mCurAttV2.stManual.asym_enable  = ccm_contex->ccmHwConf_v2.asym_adj_en;
-    ccm_contex->mCurAttV2.stManual.bound_pos_bit  = ccm_contex->ccmHwConf_v2.bound_bit;
-    ccm_contex->mCurAttV2.stManual.right_pos_bit  = ccm_contex->ccmHwConf_v2.right_bit;
-
     memcpy(attr, &ccm_contex->mCurAttV2, sizeof(rk_aiq_ccm_v2_attrib_t));
 
     return XCAM_RETURN_NO_ERROR;
 }
+
+
 #else
 XCamReturn
 rk_aiq_uapi_accm_v2_SetAttrib(RkAiqAlgoContext *ctx,
@@ -118,14 +102,10 @@ rk_aiq_uapi_accm_QueryCcmInfo(const RkAiqAlgoContext *ctx,
     if (ccm_contex->ccmHwConf.ccmEnable && ccm_contex->mCurAtt.mode == RK_AIQ_CCM_MODE_AUTO){
         ccm_querry_info->finalSat = ccm_contex->accmRest.fSaturation;
         if (ccm_contex->accmRest.pCcmProfile1) {
-            if (ccm_contex->accmRest.pCcmProfile1->name) {
-                strcpy(ccm_querry_info->ccmname1, ccm_contex->accmRest.pCcmProfile1->name);
-            }
+            strcpy(ccm_querry_info->ccmname1, ccm_contex->accmRest.pCcmProfile1->name);
         }
         if (ccm_contex->accmRest.pCcmProfile2) {
-            if (ccm_contex->accmRest.pCcmProfile2->name) {
-                strcpy(ccm_querry_info->ccmname2, ccm_contex->accmRest.pCcmProfile2->name);
-            }
+            strcpy(ccm_querry_info->ccmname2, ccm_contex->accmRest.pCcmProfile2->name);
         }
         else
             strcpy(ccm_querry_info->ccmname2, ccm_querry_info->ccmname1);
@@ -144,14 +124,10 @@ rk_aiq_uapi_accm_QueryCcmInfo(const RkAiqAlgoContext *ctx,
     if (ccm_contex->ccmHwConf_v2.ccmEnable && ccm_contex->mCurAttV2.mode == RK_AIQ_CCM_MODE_AUTO){
         ccm_querry_info->finalSat = ccm_contex->accmRest.fSaturation;
         if (ccm_contex->accmRest.pCcmProfile1) {
-            if (ccm_contex->accmRest.pCcmProfile1->name) {
-                strcpy(ccm_querry_info->ccmname1, ccm_contex->accmRest.pCcmProfile1->name);
-            }
+            strcpy(ccm_querry_info->ccmname1, ccm_contex->accmRest.pCcmProfile1->name);
         }
         if (ccm_contex->accmRest.pCcmProfile2) {
-            if (ccm_contex->accmRest.pCcmProfile2->name) {
-                strcpy(ccm_querry_info->ccmname2, ccm_contex->accmRest.pCcmProfile2->name);
-            }
+            strcpy(ccm_querry_info->ccmname2, ccm_contex->accmRest.pCcmProfile2->name);
         }
         else
             strcpy(ccm_querry_info->ccmname2, ccm_querry_info->ccmname1);
@@ -175,4 +151,53 @@ rk_aiq_uapi_accm_QueryCcmInfo(const RkAiqAlgoContext *ctx,
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_CCM_V1
+XCamReturn
+rk_aiq_uapi_accm_SetIqParam(RkAiqAlgoContext *ctx,
+                           const rk_aiq_ccm_calib_attrib_t* attr,
+                           bool need_sync) {
+#elif RKAIQ_HAVE_CCM_V2
+XCamReturn
+rk_aiq_uapi_accm_SetIqParam(RkAiqAlgoContext *ctx,
+                           const rk_aiq_ccm_v2_calib_attrib_t* attr,
+                           bool need_sync) {
+#endif
+    accm_context_t* ccm_contex = (accm_context_t*)ctx->accm_para;
+
+#if RKAIQ_HAVE_CCM_V1
+#if RKAIQ_ACCM_ILLU_VOTE
+    if (ccm_contex->stCalib_v1.aCcmCof_len != attr->aCcmCof_len)
+        clear_list(&hAccm->accmRest.dominateIlluList);
+#endif
+    ccm_contex->stCalib_v1 = attr->iqparam;
+#elif RKAIQ_HAVE_CCM_V2
+#if RKAIQ_ACCM_ILLU_VOTE
+    if (ccm_contex->stCalib_v2.aCcmCof_len != attr->aCcmCof_len)
+        clear_list(&hAccm->accmRest.dominateIlluList);
+#endif
+    ccm_contex->stCalib_v2 = attr->iqparam;
+#endif
+    ConfigbyCalib(ccm_contex);
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
+#if RKAIQ_HAVE_CCM_V1
+XCamReturn
+rk_aiq_uapi_accm_GetIqParam(const RkAiqAlgoContext *ctx,
+                           rk_aiq_ccm_calib_attrib_t* attr) {
+#elif RKAIQ_HAVE_CCM_V2
+XCamReturn
+rk_aiq_uapi_accm_GetIqParam(const RkAiqAlgoContext *ctx,
+                           rk_aiq_ccm_v2_calib_attrib_t* attr) {
+#endif
+
+    accm_context_t* ccm_contex = (accm_context_t*)ctx->accm_para;
+#if RKAIQ_HAVE_CCM_V1
+    attr->iqparam = ccm_contex->stCalib_v1;
+#elif RKAIQ_HAVE_CCM_V2
+    attr->iqparam = ccm_contex->stCalib_v2;
+#endif
+    return XCAM_RETURN_NO_ERROR;
+}
 
