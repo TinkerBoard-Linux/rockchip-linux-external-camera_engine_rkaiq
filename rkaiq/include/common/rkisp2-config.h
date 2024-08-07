@@ -4,15 +4,15 @@
  * Copyright (C) 2017 Rockchip Electronics Co., Ltd.
  */
 
-#ifndef _UAPI_RKISP2_CONFIG_H
-#define _UAPI_RKISP2_CONFIG_H
+#ifndef _UAPI_RK_ISP2_CONFIG_H
+#define _UAPI_RK_ISP2_CONFIG_H
 
 #include <linux/types.h>
 #include <linux/v4l2-controls.h>
+#include "rk-camera-module.h"
 
+#define RKISP_API_VERSION		KERNEL_VERSION(2, 5, 0)
 #include "rk_isp20_hw.h"
-
-#define RKISP_API_VERSION       KERNEL_VERSION(2, 1, 0)
 
 #ifndef BIT
 #define BIT(x) (~0ULL & (1ULL << x))
@@ -57,10 +57,26 @@
     _IOW('V', BASE_VIDIOC_PRIVATE + 11, long long)
 
 /* BASE_VIDIOC_PRIVATE + 12 for RKISP_CMD_GET_TB_HEAD_V32 */
+/* BASE_VIDIOC_PRIVATE + 14 for RKISP_CMD_SET_TB_HEAD_V32 */
 
 /* for all isp device stop and no power off but resolution change */
 #define RKISP_CMD_MULTI_DEV_FORCE_ENUM \
     _IO('V', BASE_VIDIOC_PRIVATE + 13)
+
+#define RKISP_CMD_GET_BAY3D_BUFFD \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 15, struct rkisp_bay3dbuf_info)
+
+#define RKISP_CMD_SET_AIISP_LINECNT \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 16, struct rkisp_aiisp_cfg)
+
+#define RKISP_CMD_GET_AIISP_LINECNT \
+	_IOR('V', BASE_VIDIOC_PRIVATE + 17, struct rkisp_aiisp_cfg)
+
+#define RKISP_CMD_AIISP_RD_START \
+	_IO('V', BASE_VIDIOC_PRIVATE + 18)
+
+/* BASE_VIDIOC_PRIVATE + 19 for RKISP_CMD_GET_TB_HEAD_V33 */
+/* BASE_VIDIOC_PRIVATE + 20 for RKISP_CMD_SET_TB_HEAD_V33 */
 
 /****************ISP VIDEO IOCTL******************************/
 
@@ -111,7 +127,14 @@
     (V4L2_EVENT_PRIVATE_START + 2)
 
 #define RKISP_CMD_SET_IQTOOL_CONN_ID \
-    _IOW('V', BASE_VIDIOC_PRIVATE + 113, int)
+	_IOW('V', BASE_VIDIOC_PRIVATE + 113, int)
+
+#define RKISP_CMD_SET_EXPANDER \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 114, struct rkmodule_hdr_cfg)
+
+/**********************EVENT_PRIVATE***************************/
+#define RKISP_V4L2_EVENT_AIISP_LINECNT (V4L2_EVENT_PRIVATE_START + 1)
+
 /*************************************************************/
 
 #define ISP2X_ID_DPCC           (0)
@@ -329,6 +352,50 @@ struct isp2x_mesh_head {
     u32 data_oft;
 } __attribute__ ((packed));
 
+#define RKISP_AIISP_WR_LINECNT_ID	0
+#define RKISP_AIISP_RD_LINECNT_ID	1
+struct rkisp_aiisp_ev_info {
+	int sequence;
+	int height;
+} __attribute__ ((packed));
+
+/* struct rkisp_aiisp_cfg
+ * wr_mode: 0: only one RKISP_AIISP_WR_LINECNT_ID event, else event per wr_linecnt
+ * rd_mode: 0: only one RKISP_AIISP_RD_LINECNT_ID event, else event per rd_linecnt
+ * wr_linecnt: aiisp write irq line, 0 isn't RKISP_AIISP_WR_LINECNT_ID event, and aiisp no enable
+ * rd_linecnt: aiisp read irq line, 0 isn't RKISP_AIISP_RD_LINECNT_ID event
+ */
+struct rkisp_aiisp_cfg {
+	char wr_mode;
+	char rd_mode;
+
+	int wr_linecnt;
+	int rd_linecnt;
+} __attribute__ ((packed));
+
+struct rkisp_bay3dbuf_info {
+	int iir_fd;
+	int iir_size;
+	union {
+		struct {
+			int cur_fd;
+			int cur_size;
+			int ds_fd;
+			int ds_size;
+		} v30;
+		struct {
+			int ds_fd;
+			int ds_size;
+		} v32;
+		struct {
+			int gain_fd;
+            int gain_size;
+            int aiisp_fd;
+			int aiisp_size;
+        } v39;
+	} u;
+} __attribute__ ((packed));
+
 #define RKISP_CMSK_WIN_MAX 12
 #define RKISP_CMSK_WIN_MAX_V30 8
 #define RKISP_CMSK_MOSAIC_MODE 0
@@ -339,7 +406,7 @@ struct isp2x_mesh_head {
  * RKISP_CMSK_WIN_MAX_V30 for rk3588 support 8 windows, and
  * support for mainpath and selfpath output stream channel.
  *
- * RKISP_CMSK_WIN_MAX for rv1106 support 12 windows, and
+ * RKISP_CMSK_WIN_MAX for rv1106/rv1103b support 12 windows, and
  * support for mainpath selfpath and bypasspath output stream channel.
  *
  * mode: 0:mosaic mode, 1:cover mode
@@ -2006,6 +2073,7 @@ struct rkisp_thunderboot_resmem_head {
     u32 exp_time_reg[3];
     u32 exp_gain_reg[3];
     u32 exp_isp_dgain[3];
+    u32 dcg_mode[3];
     u32 nr_buf_size;
     u32 share_mem_size;
 } __attribute__ ((packed));
@@ -2027,4 +2095,4 @@ struct rkisp_thunderboot_shmem {
     s32 shm_fd;
 } __attribute__ ((packed));
 
-#endif /* _UAPI_RKISP2_CONFIG_H */
+#endif /* _UAPI_RK_ISP2_CONFIG_H */

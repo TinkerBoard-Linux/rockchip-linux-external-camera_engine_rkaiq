@@ -62,8 +62,8 @@ CamHwIsp32::updateEffParams(void* params, void* ori_params)
 
     if (getParamsForEffMap(effFrmId)) {
         if (mAwbParams) {
-            RkAiqIspAwbParamsProxyV32* awbParams =
-                dynamic_cast<RkAiqIspAwbParamsProxyV32*>(mAwbParams);
+            RkAiqIspAwbParamsProxy* awbParams =
+                dynamic_cast<RkAiqIspAwbParamsProxy*>(mAwbParams);
             _effecting_ispparam_map[effFrmId]->data()->result.awb_cfg_v32 = awbParams->data()->result;
         }
         _effecting_ispparam_map[effFrmId]->data()->result.meas = mLatestMeasCfg;
@@ -150,9 +150,19 @@ CamHwIsp32::processTb(void* params)
 {
 #if defined(ISP_HW_V32) || defined(ISP_HW_V32_LITE)
     struct isp32_isp_params_cfg* isp_params = (struct isp32_isp_params_cfg*)params;
-    if (mTbInfo.is_pre_aiq || mTbInfo.is_start_once) {
+    if (mTbInfo.is_fastboot) {
         if (isp_params->frame_id == 0 && _not_skip_first) {
             _not_skip_first = false;
+            if (!_first_awb_param && mAwbParams) {
+                _first_awb_param = malloc(sizeof(rk_aiq_awb_stat_cfg_v32_t));
+                RkAiqIspAwbParamsProxy* awbParams =
+                    dynamic_cast<RkAiqIspAwbParamsProxy*>(mAwbParams);
+                *((rk_aiq_awb_stat_cfg_v32_t*)_first_awb_param) = awbParams->data()->result;
+            }
+            if (!_first_awb_cfg) {
+                _first_awb_cfg = malloc(sizeof(struct isp32_rawawb_meas_cfg));
+                *((struct isp32_rawawb_meas_cfg*)_first_awb_cfg) = isp_params->meas.rawawb;
+            }
             if (!_skipped_params) {
                 _skipped_params = malloc(sizeof(struct isp32_isp_params_cfg));
                 *((struct isp32_isp_params_cfg*)_skipped_params) = *isp_params;
@@ -164,6 +174,37 @@ CamHwIsp32::processTb(void* params)
             LOGK_CAMHW("<TB> Skip config id(%d)'s isp params", isp_params->frame_id);
             return true;
         } else if (!_not_skip_first) {
+            if (isp_params->frame_id < 10) {
+                if (_first_awb_cfg) {
+                    struct isp32_rawawb_meas_cfg* first_awb_cfg = (struct isp32_rawawb_meas_cfg*)_first_awb_cfg;
+                    first_awb_cfg->pre_wbgain_inv_r = isp_params->meas.rawawb.pre_wbgain_inv_r;
+                    first_awb_cfg->pre_wbgain_inv_g = isp_params->meas.rawawb.pre_wbgain_inv_g;
+                    first_awb_cfg->pre_wbgain_inv_b = isp_params->meas.rawawb.pre_wbgain_inv_b;
+                    isp_params->meas.rawawb = *first_awb_cfg;
+                    mLatestMeasCfg.rawawb = *first_awb_cfg;
+                }
+                if (getParamsForEffMap(isp_params->frame_id)) {
+                    if (mAwbParams && _first_awb_param) {
+                        rk_aiq_awb_stat_cfg_v32_t *first_awb_param = (rk_aiq_awb_stat_cfg_v32_t*)_first_awb_param;
+                        RkAiqIspAwbParamsProxy* awbParams =
+                            dynamic_cast<RkAiqIspAwbParamsProxy*>(mAwbParams);
+                        memcpy(first_awb_param->preWbgainSw, awbParams->data()->result.preWbgainSw, 4 * sizeof(float));
+                        awbParams->data()->result = *first_awb_param;
+                        _effecting_ispparam_map[isp_params->frame_id]->data()->result.awb_cfg_v32 = awbParams->data()->result;
+                    }
+                    _effecting_ispparam_map[isp_params->frame_id]->data()->result.meas = mLatestMeasCfg;
+                }
+            } else {
+                if (_first_awb_param) {
+                    free(_first_awb_param);
+                    _first_awb_param = NULL;
+                }
+                if (_first_awb_cfg) {
+                    free(_first_awb_cfg);
+                    _first_awb_cfg = NULL;
+                }
+            }
+
             if (!_skipped_params) {
                 return false;
             }
@@ -192,11 +233,6 @@ CamHwIsp32::processTb(void* params)
                     new_param->module_ens |= skip_param->module_ens & ISP32_MODULE_RAWAF;
                 }
             }
-
-            skip_param->meas.rawawb.pre_wbgain_inv_r = isp_params->meas.rawawb.pre_wbgain_inv_r;
-            skip_param->meas.rawawb.pre_wbgain_inv_g = isp_params->meas.rawawb.pre_wbgain_inv_g;
-            skip_param->meas.rawawb.pre_wbgain_inv_b = isp_params->meas.rawawb.pre_wbgain_inv_b;
-            isp_params->meas.rawawb = skip_param->meas.rawawb;
 
             free(_skipped_params);
             _skipped_params = NULL;

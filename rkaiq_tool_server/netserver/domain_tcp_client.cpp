@@ -1,4 +1,4 @@
-#include "domain_tcp_client.h"
+﻿#include "domain_tcp_client.h"
 
 #include <errno.h>
 
@@ -12,39 +12,7 @@
 #endif
 #define LOG_TAG "aiqtool"
 
-extern struct ucred* g_aiqCred;
-
-#ifdef __ANDROID__
-    #define ANDROID_RESERVED_SOCKET_PREFIX "/dev/socket/"
-
-// Connects to /dev/socket/<name> and returns the associated fd or returns -1 on error.
-// O_CLOEXEC is always set.
-static int socket_local_client(const std::string& name, int type)
-{
-    sockaddr_un addr = {.sun_family = AF_LOCAL};
-
-    std::string path = "/dev/socket/" + name;
-    if (path.size() + 1 > sizeof(addr.sun_path))
-    {
-        return -1;
-    }
-    strlcpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path));
-
-    int fd = socket(AF_LOCAL, type | SOCK_CLOEXEC, 0);
-    if (fd == -1)
-    {
-        return -1;
-    }
-
-    if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1)
-    {
-        close(fd);
-        return -1;
-    }
-
-    return fd;
-}
-#endif
+extern DomainTCPClient g_domainTcpClient;
 
 DomainTCPClient::DomainTCPClient()
 {
@@ -58,11 +26,6 @@ DomainTCPClient::~DomainTCPClient()
 
 void DomainTCPClient::Close()
 {
-    if (g_aiqCred)
-    {
-        delete g_aiqCred;
-        g_aiqCred = nullptr;
-    }
     if (sock > 0)
     {
         close(sock);
@@ -72,23 +35,7 @@ void DomainTCPClient::Close()
 
 bool DomainTCPClient::Setup(string domainPath)
 {
-#if 0
-    if (sock > 0)
-    {
-        // close(sock);
-        return true;
-    }
-    sock = socket_local_client(android::base::Basename(domainPath), SOCK_STREAM);
-    if (sock < 0)
-    {
-        LOG_ERROR("Could not create domain socket %s\n", strerror(errno));
-        return false;
-    }
-    else
-    {
-        LOG_DEBUG("Android,Create domain socket success.\n");
-    }
-#else
+    LOG_ERROR("DomainTCPClient::Setup, domainPath:%s\n", domainPath.c_str());
     if (sock == -1)
     {
         sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -104,9 +51,13 @@ bool DomainTCPClient::Setup(string domainPath)
     }
 
     server.sun_family = AF_UNIX;
-    strcpy(server.sun_path, domainPath.c_str());
+    // strcpy(server.sun_path, domainPath.c_str());
+    strncpy(server.sun_path, domainPath.c_str(), sizeof(server.sun_path) - 1);
+    server.sun_path[sizeof(server.sun_path) - 1] = '\0';
+
     struct timeval timeout = {0, 50 * 1000};
     int ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    LOG_ERROR("server.sun_path:%s\n", server.sun_path);
 
     if (connect(sock, (struct sockaddr*)&server, sizeof(server)) < 0)
     {
@@ -115,22 +66,7 @@ bool DomainTCPClient::Setup(string domainPath)
         sock = -1;
         return false;
     }
-#endif
-    if (g_aiqCred == nullptr)
-    {
-        g_aiqCred = new ucred();
-    }
-    socklen_t len = sizeof(struct ucred);
-    if (getsockopt(sock, SOL_SOCKET, SO_PEERCRED, (void*)g_aiqCred, &len) == -1)
-    {
-        // close(sock);
-        // sock = -1;
-        LOG_ERROR("getsockopt peer credentials not supported");
-    }
-    else
-    {
-        LOG_DEBUG("Credentials from SO_PEERCRED: pid=%ld, euid=%ld, egid=%ld\n", (long)g_aiqCred->pid, (long)g_aiqCred->uid, (long)g_aiqCred->gid);
-    }
+
     return true;
 }
 

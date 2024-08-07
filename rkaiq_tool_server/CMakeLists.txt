@@ -44,7 +44,6 @@ if(BUILD_SANITIZER_STATIC)
 endif()
 
 SET(RKAIQ_PROJECT_DIR "../rkaiq")
-#SET(RKAIQ_PROJECT_DIR "/home/lili/hdd/projects/3588-linux-ipc-dev/media/isp/camera_engine_rkaiq/rkaiq")
 include_directories(${RKAIQ_PROJECT_DIR}/include/iq_parser_v2/j2s)
 include_directories(${RKAIQ_PROJECT_DIR}/xcore)
 include_directories(${RKAIQ_PROJECT_DIR}/xcore/base)
@@ -129,6 +128,7 @@ include_directories(${RKAIQ_PROJECT_DIR}/include/algos/aynrV22)
 include_directories(${RKAIQ_PROJECT_DIR}/include/algos/acnrV30)
 include_directories(${RKAIQ_PROJECT_DIR}/include/algos/asharpV33)
 include_directories(${RKAIQ_PROJECT_DIR}/include/algos/ablcV32)
+include_directories(${RKAIQ_PROJECT_DIR}/include/isp)
 include_directories(${RKAIQ_PROJECT_DIR}/build/linux/output/arm)
 
 #include_directories(${RKAIQ_PROJECT_DIR}/build/linux/output/arm/installed/include/rkaiq)
@@ -143,7 +143,7 @@ include_directories(${PROJECT_SOURCE_DIR}/rkaiq/rkaiq_api)
 # link_libraries(rkaiq)
 # add_definitions(-DENABLE_RKAIQ_UAPI)
 
-file(GLOB_RECURSE ALL_SOURCE_FILES *.cpp *.cc *.h)
+file(GLOB_RECURSE ALL_SOURCE_FILES *.cpp *.cc *.h *.hpp)
 
 set(RKAIQ_TOOL_SERVER_SOURCE
 	${LOGGER_SOURCE}

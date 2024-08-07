@@ -333,7 +333,7 @@ AblcResult_V32_t AblcV32ParamsUpdate(AblcContext_V32_t* pAblcCtx, CalibDbV2_Blc_
     pAblcCtx->stBlc0Manual.blc_b = pAblcCtx->stBlc0Params.blc_b[0];
 
     // bls1
-    if (CHECK_ISP_HW_V32() || CHECK_ISP_HW_V32_LITE()) {
+    if (CHECK_ISP_HW_V39() || CHECK_ISP_HW_V32() || CHECK_ISP_HW_V32_LITE()) {
         AblcJsonParamInit_V32(&pAblcCtx->stBlc1Params, &pCalibDb->Blc1TuningPara);
         pAblcCtx->stBlc1Manual.enable = pAblcCtx->stBlc1Params.enable;
         pAblcCtx->stBlc1Manual.blc_r = pAblcCtx->stBlc1Params.blc_r[0];
@@ -343,14 +343,14 @@ AblcResult_V32_t AblcV32ParamsUpdate(AblcContext_V32_t* pAblcCtx, CalibDbV2_Blc_
     }
 
     // blc_ob
-    if (CHECK_ISP_HW_V32() || CHECK_ISP_HW_V32_LITE()) {
+    if (CHECK_ISP_HW_V39() || CHECK_ISP_HW_V32() || CHECK_ISP_HW_V32_LITE()) {
         AblcOBJsonParamInit_V32(&pAblcCtx->stBlcOBParams, &pCalibDb->BlcObPara);
         pAblcCtx->stBlcOBManual.enable = pAblcCtx->stBlcOBParams.enable;
         pAblcCtx->stBlcOBManual.ob_offset = pAblcCtx->stBlcOBParams.ob_offset[0];
         pAblcCtx->stBlcOBManual.ob_predgain = pAblcCtx->stBlcOBParams.ob_predgain[0];
     }
     // blc_ref
-    if (CHECK_ISP_HW_V32() ||  CHECK_ISP_HW_V32_LITE()) {
+    if (CHECK_ISP_HW_V39() || CHECK_ISP_HW_V32() ||  CHECK_ISP_HW_V32_LITE()) {
 #if (RKAIQ_HAVE_BAYER2DNR_V23)
         AblcRefJsonParamInit_V32(&pAblcCtx->stBlcRefParams, &pAblcCtx->stBayer2dnrCalib);
 #endif
@@ -499,12 +499,15 @@ AblcResult_V32_t Ablc_GetProcResult_V32(AblcContext_V32_t* pAblcCtx, AblcProc_V3
             // isp_ob_predgain algo result
             pAblcResult->isp_ob_predgain = pAblcCtx->stBlcOBSelect.ob_predgain;
             // isp_ob_max algo result
-            pAblcResult->isp_ob_max = (int)(4096 * pAblcResult->isp_ob_predgain) - pAblcResult->isp_ob_offset;
+            if (pAblcResult->isp_ob_predgain == 1) 
+                pAblcResult->isp_ob_max = 0xfff;
+            else
+                pAblcResult->isp_ob_max = (int)(4096 * pAblcResult->isp_ob_predgain) - pAblcResult->isp_ob_offset;
         } else {
             pAblcResult->blc_ob_enable   = false;
             pAblcResult->isp_ob_offset   = 0;
             pAblcResult->isp_ob_predgain = 1;
-            pAblcResult->isp_ob_max      = 0xfffff;
+            pAblcResult->isp_ob_max      = 0xfff;
         }
     } else if (pAblcCtx->eMode == ABLC_V32_OP_MODE_MANUAL){
         pAblcResult->enable = pAblcCtx->stBlc0Manual.enable;
@@ -539,7 +542,7 @@ AblcResult_V32_t Ablc_GetProcResult_V32(AblcContext_V32_t* pAblcCtx, AblcProc_V3
             pAblcResult->blc_ob_enable   = false;
             pAblcResult->isp_ob_offset   = 0;
             pAblcResult->isp_ob_predgain = 1;
-            pAblcResult->isp_ob_max      = 0xfffff;
+            pAblcResult->isp_ob_max      = 0xfff;
         }
     }
 

@@ -98,14 +98,10 @@ public:
     virtual XCamReturn on_dqueue(int dev_idx, SmartPtr<V4l2BufferProxy> buf_proxy) { return XCAM_RETURN_NO_ERROR; }
     virtual bool is_virtual_sensor() { return false; }
     virtual XCamReturn set_sync_mode(uint32_t mode) {return XCAM_RETURN_NO_ERROR;}
-    void setTbInfo(rk_aiq_tb_info_t info) {
-        mTbInfo = info;
-    }
 protected:
     XCAM_DEAD_COPY (BaseSensorHw);
     uint32_t get_v4l2_pixelformat(uint32_t pixelcode);
     int mCamPhyId{-1};
-    rk_aiq_tb_info_t mTbInfo;
 };
 
 class SensorHw : public BaseSensorHw {
@@ -134,7 +130,7 @@ public:
     virtual XCamReturn set_sync_mode(uint32_t mode);
 
     virtual XCamReturn set_effecting_exp_map(uint32_t sequence, void *exp_ptr, int mode);
-    virtual XCamReturn set_pause_flag(bool mode, uint32_t frameId, bool isSingleMode);
+    virtual XCamReturn set_pause_flag(bool isPause, uint32_t frameId, bool isSingleMode);
     bool get_is_single_mode() {
         return mIsSingleMode;
     }
@@ -207,6 +203,7 @@ protected:
     XCamReturn handle_sof_internal(int64_t time, uint32_t frameid);
     XCamReturn setI2cDAta(pending_split_exps_t* exps);
     int get_nr_switch(rk_aiq_sensor_nr_switch_t* nr_switch);
+    int get_dcg_ratio(rk_aiq_sensor_dcg_ratio_t* dcg_ratio);
     XCamReturn _set_mirror_flip();
 
     bool mPauseFlag{false};

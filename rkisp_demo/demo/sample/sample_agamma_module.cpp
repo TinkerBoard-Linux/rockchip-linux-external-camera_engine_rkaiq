@@ -16,7 +16,10 @@
  */
 
 #include "sample_comm.h"
+
 #include "uAPI2/rk_aiq_user_api2_agamma.h"
+#include "uAPI2/rk_aiq_user_api2_helper.h"
+#include <string>
 
 #define LIMIT_VALUE(value,max_value,min_value)      (value > max_value? max_value : value < min_value ? min_value : value)
 
@@ -36,7 +39,10 @@ static void sample_agamma_usage()
     printf("\t 9) AGAMMA:         test rk_aiq_user_api2_agamma_SetAttrib stFast Sync.\n");
     printf("\t a) AGAMMA:         test rk_aiq_user_api2_agamma_SetAttrib stFast Async.\n");
     printf("\t b) AGAMMA:         test rk_aiq_user_api2_agamma_GetAttrib.\n");
-    printf("\t q) AGAMMA:         return to main sample screen.\n");
+    printf("\t c) AGAMMA:         test rk_aiq_user_api2_gamma_GetAttrib.\n");
+    printf("\t d) AGAMMA:         test rk_aiq_user_api2_gamma_SetAttrib manual.\n");
+    printf("\t e) AGAMMA:         test rk_aiq_user_api2_gamma_SetAttrib auto.\n");
+    printf("\t f) AGAMMA:         test rk_aiq_user_api2_gamma_QueryStatus.\n");
 
     printf("\n");
     printf("\t please press the key: ");
@@ -48,12 +54,128 @@ void sample_print_agamma_info(const void *arg)
 {
     printf ("enter AGAMMA modult test!\n");
 }
+#ifdef USE_NEWSTRUCT
+void get_auto_attr(gamma_api_attrib_t* attr) {
+    gamma_param_auto_t* stAuto = &attr->stAuto;
+    for (int i = 0;i < 13;i++) {
+    }
+}
 
-XCamReturn sample_agamma_module(const void *arg)
+void get_manual_attr(gamma_api_attrib_t* attr) {
+    gamma_param_t* stMan = &attr->stMan;
+}
+
+void sample_agamma_test(const rk_aiq_sys_ctx_t* ctx) {
+
+    printf("+++++++ gamma module test start ++++++++\n");
+
+    gamma_api_attrib_t attr;
+    memset(&attr, 0, sizeof(attr));
+
+    rk_aiq_user_api2_gamma_GetAttrib(ctx, &attr);
+
+    printf("gamma attr: opmode:%d, en:%d, bypass:%d\n", attr.opMode, attr.en, attr.bypass);
+
+    srand(time(0));
+    int rand_num = rand() % 101;
+
+    if (rand_num <70) {
+        printf("update gamma arrrib!\n");
+        if (attr.opMode == RK_AIQ_OP_MODE_AUTO) {
+            attr.opMode = RK_AIQ_OP_MODE_MANUAL;
+            get_manual_attr(&attr);
+        }
+        else {
+            get_auto_attr(&attr);
+            attr.opMode = RK_AIQ_OP_MODE_AUTO;
+        }
+    }
+    else {
+        // reverse en
+        printf("reverse gamma en!\n");
+        attr.en = !attr.en;
+    }
+
+    rk_aiq_user_api2_gamma_SetAttrib(ctx, &attr);
+
+    // wait more than 2 frames
+    usleep(90 * 1000);
+
+    gamma_status_t status;
+    memset(&status, 0, sizeof(gamma_status_t));
+
+    rk_aiq_user_api2_gamma_QueryStatus(ctx, &status);
+
+    printf("gamma status: opmode:%d, en:%d, bypass:%d\n", status.opMode, status.en, status.bypass);
+
+    if (status.opMode != attr.opMode || status.en != attr.en)
+        printf("gamma test failed\n");
+    printf("-------- gamma module test done --------\n");
+}
+
+static void sample_gamma_tuningtool_test(const rk_aiq_sys_ctx_t* ctx)
+{
+    char *ret_str = NULL;
+
+    printf(">>> start tuning tool test: op attrib get ...\n");
+
+    std::string json_gamma_status_str = " \n\
+        [{ \n\
+            \"op\":\"get\", \n\
+            \"path\": \"/uapi/0/gamma_uapi/info\", \n\
+            \"value\": \n\
+            { \"opMode\": \"RK_AIQ_OP_MODE_MANUAL\", \"en\": 0,\"bypass\": 3} \n\
+        }]";
+
+    rkaiq_uapi_unified_ctl(const_cast<rk_aiq_sys_ctx_t*>(ctx),
+                           const_cast<char*>(json_gamma_status_str.c_str()), &ret_str, RKAIQUAPI_OPMODE_GET);
+
+    if (ret_str) {
+        printf("gamma status json str: %s\n", ret_str);
+    }
+
+    printf("  start tuning tool test: op attrib set ...\n");
+    std::string json_gamma_str = " \n\
+        [{ \n\
+            \"op\":\"replace\", \n\
+            \"path\": \"/uapi/0/gamma_uapi/attr\", \n\
+            \"value\": \n\
+            { \"opMode\": \"RK_AIQ_OP_MODE_MANUAL\", \"en\": 1,\"bypass\": 1} \n\
+        }]";
+    printf("gamma json_cmd_str: %s\n", json_gamma_str.c_str());
+    ret_str = NULL;
+    rkaiq_uapi_unified_ctl(const_cast<rk_aiq_sys_ctx_t*>(ctx),
+                           const_cast<char*>(json_gamma_str.c_str()), &ret_str, RKAIQUAPI_OPMODE_SET);
+
+    // wait more than 2 frames
+    usleep(90 * 1000);
+
+
+    gamma_status_t status;
+    memset(&status, 0, sizeof(gamma_status_t));
+
+    rk_aiq_user_api2_gamma_QueryStatus(ctx, &status);
+
+    if (status.opMode != RK_AIQ_OP_MODE_MANUAL || status.en != 1 || status.bypass != 1) {
+        printf("gamma op set_attrib failed !\n");
+        printf("gamma status: opmode:%d(EXP:%d), en:%d(EXP:%d), bypass:%d(EXP:%d)\n",
+               status.opMode, RK_AIQ_OP_MODE_MANUAL, status.en, 1, status.bypass, 1);
+    } else {
+        printf("gamma op set_attrib success !\n");
+    }
+
+    printf(">>> tuning tool test done \n");
+}
+#endif
+XCamReturn sample_agamma_module(const void* arg)
 {
     int key = -1;
     CLEAR();
 
+#ifdef USE_NEWSTRUCT
+    gamma_api_attrib_t attr21;
+    gamma_status_t status;
+#endif
     rk_aiq_gamma_v10_attr_t attr_v10;
     rk_aiq_gamma_v11_attr_t attr_v11;
     rk_aiq_gamma_attrib_V2_t attr_v2;
@@ -247,6 +369,17 @@ XCamReturn sample_agamma_module(const void *arg)
                    attr_v2.atrrV30.stManual.Gamma_curve[5]);
             break;
         }
+#ifdef USE_NEWSTRUCT
+        case 'g': {
+            sample_gamma_tuningtool_test(ctx);
+            break;
+        }
+
+        case 'h': {
+            sample_agamma_test(ctx);
+            break;
+        }
+#endif
         default:
             break;
         }

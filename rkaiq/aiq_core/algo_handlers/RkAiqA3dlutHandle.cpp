@@ -245,7 +245,7 @@ XCamReturn RkAiqA3dlutHandleInt::processing() {
         LOGE("fail to get sensor gain form AE module,use default value ");
     }
 
-#if RKAIQ_HAVE_BLC_V32
+#if RKAIQ_HAVE_BLC_V32 && !USE_NEWSTRUCT
     if (shared->res_comb.ablcV32_proc_res->blc_ob_enable) {
         if (shared->res_comb.ablcV32_proc_res->isp_ob_predgain >= 1.0f) {
             a3dlut_proc_int->sensorGain *=  shared->res_comb.ablcV32_proc_res->isp_ob_predgain;
@@ -306,7 +306,7 @@ XCamReturn RkAiqA3dlutHandleInt::genIspResult(RkAiqFullParams* params,
         (RkAiqCore::RkAiqAlgosGroupShared_t*)(getGroupShared());
     RkAiqCore::RkAiqAlgosComShared_t* sharedCom = &mAiqCore->mAlogsComSharedParams;
     RkAiqAlgoProcResA3dlut* a3dlut_com = (RkAiqAlgoProcResA3dlut*)mProcOutParam;
-    rk_aiq_isp_lut3d_params_v20_t* lut3d_param = params->mLut3dParams->data().ptr();
+    rk_aiq_isp_lut3d_params_t* lut3d_param = params->mLut3dParams->data().ptr();
 
     if (sharedCom->init) {
         lut3d_param->frame_id = 0;

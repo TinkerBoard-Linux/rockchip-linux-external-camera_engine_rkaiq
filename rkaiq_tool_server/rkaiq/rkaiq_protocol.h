@@ -12,6 +12,8 @@
 #include "rkaiq_media.h"
 #include "rkaiq_online_protocol.h"
 #include "rkaiq_raw_protocol.h"
+#include <memory>
+#include <thread>
 
 int StopProcess(const char* process, const char* str);
 int WaitProcessExit(const char* process, int sec);
@@ -27,8 +29,12 @@ class RKAiqProtocol
     static void HandlerReceiveFile(int sockfd, char* buffer, int size);
     static void HandlerOfflineRawProcess(int sockfd, char* buffer, int size);
     static void HandlerGetAWBParaFileProcess(int sockfd, char* buffer, int size);
+    static void HandlerJson2BinProcess(int sockfd, char* buffer, int size);
+    static void HandlerI2CTransferProcess(int sockfd, char* buffer, int size);
     static int MessageForward(int sockfd, char* buffer, int size);
     static int doMessageForward(int sockfd);
+    static int doWriteAiqData(int sockfd, char* buffer, int size);
+    static int doReadAiqData(int sockfd, char* buffer, int size);
     static int offlineRawProcess(int sockfd);
     static void KillApp();
     static int StartApp();

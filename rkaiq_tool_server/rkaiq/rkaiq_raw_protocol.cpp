@@ -9,7 +9,14 @@
 #include <vector>
 #include <regex>
 #include <sstream>
+#include <list>
+
+#include <thread>
+#include <stdarg.h>
+#include <memory>
 using namespace std;
+
+#include <dirent.h>
 
 #ifdef LOG_TAG
     #undef LOG_TAG
@@ -21,10 +28,12 @@ static int capture_mode = CAPTURE_NORMAL;
 static int capture_frames = 1;
 static int capture_frames_index = 0;
 static uint16_t capture_check_sum;
+static std::list<uint16_t> capture_check_sum_list;
 static struct capture_info cap_info;
 static uint32_t* averge_frame0;
 static uint16_t* averge_frame1;
 static int needSetParamFlag = 1;
+static std::timed_mutex sendRawMtx;
 
 extern int g_sensorMemoryMode;
 extern int g_sensorSyncMode;
@@ -32,6 +41,8 @@ extern std::string g_sensor_name;
 extern std::shared_ptr<RKAiqMedia> rkaiq_media;
 extern int g_device_id;
 extern uint32_t g_sensorHdrMode;
+extern int g_usingCaptureCacheFlag;
+extern std::string g_capture_cache_dir;
 
 static void ExecuteCMD(const char* cmd, char* result)
 {
@@ -39,6 +50,7 @@ static void ExecuteCMD(const char* cmd, char* result)
     char ps[2048] = {0};
     FILE* ptr;
     strcpy(ps, cmd);
+    strcat(ps, " 2>&1"); // Redirect stderr to stdout
     if ((ptr = popen(ps, "r")) != NULL)
     {
         while (fgets(buf_ps, 2048, ptr) != NULL)
@@ -56,6 +68,92 @@ static void ExecuteCMD(const char* cmd, char* result)
     {
         printf("popen %s error\n", ps);
     }
+}
+
+static int strcmp_natural(const char* a, const char* b)
+{
+    if (!a || !b)
+        return a ? 1 : b ? -1 : 0;
+
+    if (isdigit(*a) && isdigit(*b))
+    {
+        char* remainderA;
+        char* remainderB;
+        long valA = strtol(a, &remainderA, 10);
+        long valB = strtol(b, &remainderB, 10);
+        if (valA != valB)
+        {
+            return valA - valB;
+        }
+        else
+        {
+            std::ptrdiff_t lengthA = remainderA - a;
+            std::ptrdiff_t lengthB = remainderB - b;
+            if (lengthA != lengthB)
+                return lengthA - lengthB;
+            else
+                return strcmp_natural(remainderA, remainderB);
+        }
+    }
+
+    if (isdigit(*a) || isdigit(*b))
+        return isdigit(*a) ? -1 : 1;
+
+    while (*a && *b)
+    {
+        if (isdigit(*a) || isdigit(*b))
+            return strcmp_natural(a, b);
+        if (*a != *b)
+            return *a - *b;
+        a++;
+        b++;
+    }
+    return *a ? 1 : *b ? -1 : 0;
+}
+
+static bool natural_less(const string& lhs, const string& rhs)
+{
+    return strcmp_natural(lhs.c_str(), rhs.c_str()) < 0;
+}
+
+static bool natural_more(const string& lhs, const string& rhs)
+{
+    return strcmp_natural(lhs.c_str(), rhs.c_str()) > 0;
+}
+
+static std::string string_format(const std::string fmt_str, ...)
+{
+    int final_n, n = ((int)fmt_str.size()) * 2;
+    std::unique_ptr<char[]> formatted;
+    va_list ap;
+    while (1)
+    {
+        formatted.reset(new char[n]);
+        strcpy(&formatted[0], fmt_str.c_str());
+        va_start(ap, fmt_str);
+        final_n = vsnprintf(&formatted[0], n, fmt_str.c_str(), ap);
+        va_end(ap);
+        if (final_n < 0 || final_n >= n)
+            n += abs(final_n - n + 1);
+        else
+            break;
+    }
+    return std::string(formatted.get());
+}
+
+static string GetTime()
+{
+    string timeString;
+    struct tm* tm_t;
+    struct timeval time;
+    gettimeofday(&time, NULL);
+    tm_t = localtime(&time.tv_sec);
+    if (NULL != tm_t)
+    {
+        timeString = string_format("%04d-%02d-%02d %02d:%02d:%02d.%03ld", tm_t->tm_year + 1900, tm_t->tm_mon + 1, tm_t->tm_mday, tm_t->tm_hour, tm_t->tm_min, tm_t->tm_sec, time.tv_usec / 1000);
+    }
+
+    return timeString;
 }
 
 static void SendMessageToPC(int sockfd, char* data, unsigned long long dataSize = 0)
@@ -415,7 +513,6 @@ static void GetSensorPara(CommandData_t* cmd, int ret_status)
     {
         cmd->checkSum += cmd->dat[i];
     }
-    LOG_DEBUG("cmd->checkSum %d\n", cmd->checkSum);
 
     if (cap_info.subdev_fd > 0)
     {
@@ -465,10 +562,6 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
         {
             LOG_ERROR("get cif node %s memory mode failed.\n", cap_info.dev_name);
         }
-        else
-        {
-            LOG_INFO("get cif node memory mode:%d .\n", g_sensorMemoryMode);
-        }
 
         if (g_sensorHdrMode == NO_HDR)
         {
@@ -477,10 +570,6 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
             if (ret > 0)
             {
                 LOG_ERROR("set cif node %s compact mode failed.\n", cap_info.dev_name);
-            }
-            else
-            {
-                LOG_INFO("cif node %s set to no compact mode.\n", cap_info.dev_name);
             }
         }
         else
@@ -495,19 +584,11 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
         {
             LOG_ERROR("get cif node %s sync mode failed.\n", cap_info.sd_path.device_name);
         }
-        else
-        {
-            LOG_INFO("get cif node sync mode:%d .\n", g_sensorSyncMode);
-        }
         int value = NO_SYNC_MODE;
         ret = ioctl(sensorfd, RKMODULE_SET_SYNC_MODE, &value); // set to no sync
         if (ret > 0)
         {
             LOG_ERROR("set cif node %s sync mode failed.\n", cap_info.sd_path.device_name);
-        }
-        else
-        {
-            LOG_INFO("cif node %s set to no sync mode.\n", cap_info.sd_path.device_name);
         }
         close(sensorfd);
     }
@@ -583,6 +664,7 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
     cap_info.lhcg = CapParam->lhcg;
     capture_mode = CapParam->multiframe;
     capture_check_sum = 0;
+    capture_check_sum_list.clear();
 
     if (needSetParamFlag == 1)
     {
@@ -665,7 +747,6 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
     {
         cmd->checkSum += cmd->dat[i];
     }
-    LOG_DEBUG("cmd->checkSum %d\n", cmd->checkSum);
 
     if (cap_info.subdev_fd > 0)
     {
@@ -676,7 +757,6 @@ static void SetCapConf(CommandData_t* recv_cmd, CommandData_t* cmd, int ret_stat
 
 static void SendRawData(int socket, int index, void* buffer, int size)
 {
-    LOG_DEBUG("SendRawData\n");
     assert(buffer);
 
     char* buf = NULL;
@@ -707,34 +787,38 @@ static void SendRawData(int socket, int index, void* buffer, int size)
         check_sum += buf[i];
     }
 
-    LOG_INFO("capture raw index %d, check_sum %d capture_check_sum %d\n", index, check_sum, capture_check_sum);
     capture_check_sum = check_sum;
+    capture_check_sum_list.push_back(check_sum);
+    LOG_DEBUG("SendRawData size %d check_sum %d\n", size, check_sum);
 }
 
 static void DoCaptureCallBack(int socket, int index, void* buffer, int size)
 {
-    LOG_DEBUG("DoCaptureCallBack size %d\n", size);
     int width = cap_info.width;
     int height = cap_info.height;
-    LOG_DEBUG("cap_info.width %d\n", cap_info.width);
-    LOG_DEBUG("cap_info.height %d\n", cap_info.height);
     if (g_sensorHdrMode == NO_HDR && size > (width * height * 2))
     {
-        LOG_ERROR("DoMultiFrameCallBack size error\n");
+        LOG_ERROR("DoCaptureCallBack size error\n");
         return;
     }
-    SendRawData(socket, index, buffer, size);
-    // SendRawDataWithExpInfo(socket, index, buffer, size, &cap_info.expInfo, sizeof(ExpInfo_t1));
+    SendRawData(socket, capture_frames_index, buffer, size);
+    capture_frames_index++;
 }
 
 static void DoCapture(int socket)
 {
-    LOG_DEBUG("DoCapture entry!!!!!\n");
-    AutoDuration ad;
-    int skip_frame = 5;
+    if (capture_frames_index == 0)
+    {
+        char tmpPath[100] = {0};
+        getcwd(tmpPath, 100);
+        string currentDir = tmpPath;
+        string tmpCmd = string_format("rm -rf %s/* && sync", g_capture_cache_dir.c_str());
+        system(tmpCmd.c_str());
+    }
 
     if (capture_frames_index == 0)
     {
+        int skip_frame = 5;
         for (int i = 0; i < skip_frame; i++)
         {
             if (i == 0 && cap_info.lhcg != 2)
@@ -745,12 +829,10 @@ static void DoCapture(int socket)
             LOG_DEBUG("DoCapture skip frame %d ...\n", i);
         }
     }
-
-    read_frame(socket, capture_frames_index, &cap_info, DoCaptureCallBack);
-    capture_frames_index++;
-
-    LOG_INFO("DoCapture %lld ms %lld us\n", ad.Get() / 1000, ad.Get() % 1000);
-    LOG_DEBUG("DoCapture exit!!!!!\n");
+    // for (size_t i = 0; i < cap_info.frame_count; i++)
+    {
+        read_frame(socket, capture_frames_index, &cap_info, DoCaptureCallBack);
+    }
 }
 
 #if DEBUG_RAW
@@ -773,15 +855,15 @@ static void DoMultiFrameCallBack(int socket, int index, void* buffer, int size)
 
     if (size > (width * height * 2))
     {
-        LOG_ERROR(" DoMultiFrameCallBack size error\n");
+        LOG_ERROR("DoMultiFrameCallBack size error\n");
         return;
     }
 
 #if DEBUG_RAW
     WriteToFile(index, buffer, size);
 #endif
-    int offset = (((height / 2) + 10) * width) + (width / 2);
-    DumpRawData((uint16_t*)buffer + offset, size, 2);
+    // int offset = (((height / 2) + 10) * width) + (width / 2);
+    // DumpRawData((uint16_t*)buffer + offset, size, 2);
     if (cap_info.link == link_to_vicap)
     {
         MultiFrameAddition((uint32_t*)averge_frame0, (uint16_t*)buffer, width, height, false);
@@ -790,7 +872,7 @@ static void DoMultiFrameCallBack(int socket, int index, void* buffer, int size)
     {
         MultiFrameAddition((uint32_t*)averge_frame0, (uint16_t*)buffer, width, height);
     }
-    DumpRawData32((uint32_t*)averge_frame0 + offset, size, 2);
+    // DumpRawData32((uint32_t*)averge_frame0 + offset, size, 2);
     LOG_DEBUG("index %d MultiFrameAddition %lld ms %lld us\n", index, ad.Get() / 1000, ad.Get() % 1000);
     ad.Reset();
     if (index == (capture_frames - 1))
@@ -800,8 +882,8 @@ static void DoMultiFrameCallBack(int socket, int index, void* buffer, int size)
         WriteToFile(88, averge_frame0, size);
         WriteToFile(89, averge_frame1, size);
 #endif
-        DumpRawData32((uint32_t*)averge_frame0 + offset, size, 2);
-        DumpRawData((uint16_t*)averge_frame1 + offset, size, 2);
+        // DumpRawData32((uint32_t*)averge_frame0 + offset, size, 2);
+        // DumpRawData((uint16_t*)averge_frame1 + offset, size, 2);
         LOG_DEBUG("index %d MultiFrameAverage %lld ms %lld us\n", index, ad.Get() / 1000, ad.Get() % 1000);
         ad.Reset();
         SendRawData(socket, index, averge_frame1, size);
@@ -842,9 +924,6 @@ static int deInitMultiFrame()
 
 static void DoMultiFrameCapture(int socket)
 {
-    LOG_DEBUG("DoMultiFrameCapture entry!!!!!\n");
-    AutoDuration ad;
-
     int skip_frame = 5;
     if (capture_frames_index == 0)
     {
@@ -875,9 +954,6 @@ static void DoMultiFrameCapture(int socket)
             capture_frames_index++;
         }
     }
-
-    LOG_INFO("DoMultiFrameCapture %lld ms %lld us\n", ad.Get() / 1000, ad.Get() % 1000);
-    LOG_DEBUG("DoMultiFrameCapture exit!!!!!\n");
 }
 
 static void DumpCapinfo()
@@ -896,7 +972,6 @@ static void DumpCapinfo()
 
 static int StartCapture()
 {
-    LOG_DEBUG("enter\n");
     init_device(&cap_info);
     DumpCapinfo();
     start_capturing(&cap_info);
@@ -904,13 +979,12 @@ static int StartCapture()
     {
         InitMultiFrame();
     }
-    LOG_DEBUG("exit\n");
     return 0;
 }
 
 static int StopCapture()
 {
-    LOG_DEBUG("enter\n");
+    usleep(1000 * 500);
     stop_capturing(&cap_info);
     uninit_device(&cap_info);
     RawCaptureDeinit();
@@ -918,14 +992,11 @@ static int StopCapture()
     {
         deInitMultiFrame();
     }
-    LOG_DEBUG("exit\n");
     return 0;
 }
 
 static void RawCaputure(CommandData_t* cmd, int socket)
 {
-    LOG_DEBUG("enter\n");
-    LOG_DEBUG("capture_frames %d capture_frames_index %d\n", capture_frames, capture_frames_index);
     if (capture_frames_index == 0)
     {
         StartCapture();
@@ -945,7 +1016,6 @@ static void RawCaputure(CommandData_t* cmd, int socket)
         StopCapture();
         //
         int fd = open(cap_info.dev_name, O_RDWR, 0);
-        LOG_INFO("fd: %d\n", fd);
         if (fd < 0)
         {
             LOG_ERROR("Open dev %s failed.\n", cap_info.dev_name);
@@ -959,10 +1029,6 @@ static void RawCaputure(CommandData_t* cmd, int socket)
                 {
                     LOG_ERROR("set cif node %s compact mode failed.\n", cap_info.dev_name);
                 }
-                else
-                {
-                    LOG_INFO("cif node %s set to mode %d.\n", cap_info.dev_name, g_sensorMemoryMode);
-                }
             }
         }
         close(fd);
@@ -974,17 +1040,18 @@ static void RawCaputure(CommandData_t* cmd, int socket)
         {
             LOG_ERROR("set cif node %s sync mode failed.\n", cap_info.sd_path.device_name);
         }
-        else
-        {
-            LOG_INFO("cif node %s set to no sync mode.\n", cap_info.sd_path.device_name);
-        }
         close(sensorfd);
     }
-    LOG_DEBUG("exit\n");
 }
 
 static void SendRawDataResult(CommandData_t* cmd, CommandData_t* recv_cmd)
 {
+    if (capture_check_sum_list.size() <= 0)
+    {
+        LOG_DEBUG("capture_check_sum_list size <=0,return.\n");
+        return;
+    }
+
     unsigned short* checksum;
     checksum = (unsigned short*)&recv_cmd->dat[1];
     strncpy((char*)cmd->RKID, TAG_DEVICE_TO_PC, sizeof(cmd->RKID));
@@ -993,8 +1060,9 @@ static void SendRawDataResult(CommandData_t* cmd, CommandData_t* recv_cmd)
     cmd->datLen = 2;
     memset(cmd->dat, 0, sizeof(cmd->dat));
     cmd->dat[0] = 0x04;
-    LOG_DEBUG("capture_check_sum %d, recieve %d\n", capture_check_sum, *checksum);
-    if (capture_check_sum == *checksum)
+    uint16_t lastRawChecksum = capture_check_sum_list.front();
+    capture_check_sum_list.pop_front();
+    if (lastRawChecksum == *checksum)
     {
         cmd->dat[1] = RES_SUCCESS;
     }
@@ -1013,8 +1081,6 @@ static void SendRawDataResult(CommandData_t* cmd, CommandData_t* recv_cmd)
 static void DoAnswer(int sockfd, CommandData_t* cmd, int cmd_id, int ret_status)
 {
     char send_data[MAXPACKETSIZE];
-    LOG_DEBUG("enter\n");
-
     strncpy((char*)cmd->RKID, RKID_ISP_ON, sizeof(cmd->RKID));
     cmd->cmdType = CMD_TYPE_CAPTURE;
     cmd->cmdID = cmd_id;
@@ -1030,13 +1096,11 @@ static void DoAnswer(int sockfd, CommandData_t* cmd, int cmd_id, int ret_status)
 
     memcpy(send_data, cmd, sizeof(CommandData_t));
     send(sockfd, send_data, sizeof(CommandData_t), 0);
-    LOG_DEBUG("exit\n");
 }
 
 static void DoAnswer2(int sockfd, CommandData_t* cmd, int cmd_id, uint16_t check_sum, uint32_t result)
 {
     char send_data[MAXPACKETSIZE];
-    LOG_DEBUG("enter\n");
     strncpy((char*)cmd->RKID, RKID_ISP_ON, sizeof(cmd->RKID));
     cmd->cmdType = CMD_TYPE_CAPTURE;
     cmd->cmdID = cmd_id;
@@ -1054,7 +1118,6 @@ static void DoAnswer2(int sockfd, CommandData_t* cmd, int cmd_id, uint16_t check
 
     memcpy(send_data, cmd, sizeof(CommandData_t));
     send(sockfd, send_data, sizeof(CommandData_t), 0);
-    LOG_DEBUG("exit\n");
 }
 
 static void OnLineSet(int sockfd, CommandData_t* cmd, uint16_t& check_sum, uint32_t& result)
@@ -1063,8 +1126,6 @@ static void OnLineSet(int sockfd, CommandData_t* cmd, uint16_t& check_sum, uint3
     int param_size = *(int*)cmd->dat;
     int remain_size = param_size;
 
-    LOG_DEBUG("enter\n");
-    LOG_DEBUG("expect recv param_size 0x%x\n", param_size);
     char* param = (char*)malloc(param_size);
     while (remain_size > 0)
     {
@@ -1090,7 +1151,6 @@ static void OnLineSet(int sockfd, CommandData_t* cmd, uint16_t& check_sum, uint3
     {
         free(param);
     }
-    LOG_DEBUG("exit\n");
 }
 
 void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
@@ -1099,9 +1159,6 @@ void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
     CommandData_t send_cmd;
     char send_data[MAXPACKETSIZE];
     int ret_val, ret;
-
-    LOG_DEBUG("HandlerRawCapMessage:\n");
-
     // for (int i = 0; i < common_cmd->datLen; i++) {
     //   LOG_DEBUG("DATA[%d]: 0x%x\n", i, common_cmd->dat[i]);
     // }
@@ -1109,21 +1166,19 @@ void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
     // if (strcmp((char *)common_cmd->RKID, TAG_PC_TO_DEVICE) == 0) {
     //   LOG_DEBUG("RKID: %s\n", common_cmd->RKID);
     // } else {
-    //   LOG_DEBUG("RKID: Unknow\n");
+    //   LOG_DEBUG("RKID: unknown\n");
     //   return;
     // }
 
     if (common_cmd->cmdType == CMD_TYPE_CAPTURE)
     {
         RKAiqProtocol::DoChangeAppMode(APP_RUN_STATUS_CAPTURE);
-        LOG_DEBUG("cmdType: CMD_TYPE_CAPTURE\n");
     }
     else if (common_cmd->cmdType == CMD_TYPE_STREAMING)
     {
         RKAiqProtocol::DoChangeAppMode(APP_RUN_STATUS_STREAMING);
         InitCommandStreamingAns(&send_cmd, RES_SUCCESS);
         send(sockfd, &send_cmd, sizeof(CommandData_t), 0);
-        LOG_DEBUG("cmdType: CMD_TYPE_STREAMING\n");
         if (common_cmd->cmdID == 0xffff)
         {
             uint16_t check_sum;
@@ -1136,16 +1191,13 @@ void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
     }
     else
     {
-        LOG_DEBUG("cmdType: Unknow %x\n", common_cmd->cmdType);
+        LOG_DEBUG("cmdType: unknown %x\n", common_cmd->cmdType);
         return;
     }
 
-    LOG_DEBUG("cmdID: %x\n", common_cmd->cmdID);
-
     switch (common_cmd->cmdID)
     {
-        case CMD_ID_CAPTURE_STATUS:
-            LOG_DEBUG("CmdID CMD_ID_CAPTURE_STATUS in\n");
+        case CMD_ID_CAPTURE_STATUS: {
             if (common_cmd->dat[0] == KNOCK_KNOCK)
             {
                 InitCommandPingAns(&send_cmd, READY);
@@ -1153,21 +1205,20 @@ void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
             }
             else
             {
-                // SendMessageToPC(sockfd, "Unknow CMD_ID_CAPTURE_STATUS message");
-                LOG_ERROR("Unknow CMD_ID_CAPTURE_STATUS message\n");
+                // SendMessageToPC(sockfd, "unknown CMD_ID_CAPTURE_STATUS message");
+                LOG_ERROR("unknown CMD_ID_CAPTURE_STATUS message\n");
             }
             memcpy(send_data, &send_cmd, sizeof(CommandData_t));
             send(sockfd, send_data, sizeof(CommandData_t), 0);
-            LOG_DEBUG("cmdID CMD_ID_CAPTURE_STATUS out\n\n");
-            break;
+        }
+        break;
         case CMD_ID_CAPTURE_RAW_CAPTURE: {
-            LOG_DEBUG("CmdID RAW_CAPTURE in\n");
+
             char* datBuf = (char*)(common_cmd->dat);
 
             switch (datBuf[0])
             {
-                case DATA_ID_CAPTURE_RAW_STATUS:
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_STATUS in\n");
+                case DATA_ID_CAPTURE_RAW_STATUS: {
                     if (common_cmd->dat[1] == KNOCK_KNOCK)
                     {
                         if (capture_status == RAW_CAP)
@@ -1183,48 +1234,44 @@ void RKAiqRawProtocol::HandlerRawCapMessage(int sockfd, char* buffer, int size)
                     }
                     else
                     {
-                        // SendMessageToPC(sockfd, "Unknow DATA_ID_CAPTURE_RAW_STATUS message");
-                        LOG_ERROR("Unknow DATA_ID_CAPTURE_RAW_STATUS message\n");
+                        // SendMessageToPC(sockfd, "unknown DATA_ID_CAPTURE_RAW_STATUS message");
+                        LOG_ERROR("unknown DATA_ID_CAPTURE_RAW_STATUS message\n");
                     }
                     memcpy(send_data, &send_cmd, sizeof(CommandData_t));
                     send(sockfd, send_data, sizeof(CommandData_t), 0);
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_STATUS out\n");
-                    break;
-                case DATA_ID_CAPTURE_RAW_GET_PARAM:
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_GET_PARAM in\n");
+                }
+                break;
+                case DATA_ID_CAPTURE_RAW_GET_PARAM: {
                     RawCaptureinit(common_cmd);
                     GetSensorPara(&send_cmd, RES_SUCCESS);
                     LOG_DEBUG("send_cmd.checkSum %d\n", send_cmd.checkSum);
                     memcpy(send_data, &send_cmd, sizeof(CommandData_t));
                     ret_val = send(sockfd, send_data, sizeof(CommandData_t), 0);
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_GET_PARAM out\n");
-                    break;
-                case DATA_ID_CAPTURE_RAW_SET_PARAM:
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_SET_PARAM in\n");
+                }
+                break;
+                case DATA_ID_CAPTURE_RAW_SET_PARAM: {
                     SetCapConf(common_cmd, &send_cmd, READY);
                     memcpy(send_data, &send_cmd, sizeof(CommandData_t));
                     send(sockfd, send_data, sizeof(CommandData_t), 0);
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_SET_PARAM out\n");
-                    break;
+                }
+                break;
                 case DATA_ID_CAPTURE_RAW_START: {
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_START in\n");
                     capture_status = RAW_CAP;
                     RawCaputure(&send_cmd, sockfd);
                     capture_status = AVALIABLE;
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_START out\n");
-                    break;
                 }
-                case DATA_ID_CAPTURE_RAW_CHECKSUM:
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_CHECKSUM in\n");
+                break;
+                case DATA_ID_CAPTURE_RAW_CHECKSUM: {
                     SendRawDataResult(&send_cmd, common_cmd);
                     memcpy(send_data, &send_cmd, sizeof(CommandData_t));
                     ret_val = send(sockfd, send_data, sizeof(CommandData_t), 0);
-                    LOG_DEBUG("ProcID DATA_ID_CAPTURE_RAW_CHECKSUM out\n");
-                    break;
+                    sendRawMtx.unlock();
+                }
+                break;
                 default:
                     break;
             }
-            LOG_DEBUG("CmdID RAW_CAPTURE out\n\n");
+
             break;
         }
         default:

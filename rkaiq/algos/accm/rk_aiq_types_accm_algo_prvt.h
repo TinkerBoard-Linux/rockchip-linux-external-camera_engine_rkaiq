@@ -41,6 +41,11 @@ typedef struct {
 } accmCof_initlen_info_t;
 
 typedef struct {
+    float scl;
+    uint8_t tbl_idx;
+} yalp_tbl_info_t;
+
+typedef struct {
     unsigned int name_len;
     unsigned int illu_len;
 } matrixall_initlen_info_t;
@@ -58,8 +63,8 @@ typedef struct accm_rest_s {
 #endif
     struct list_head problist;
     int dominateIlluProfileIdx;
-    const CalibDbV2_Ccm_Matrix_Para_t *pCcmProfile1;
-    const CalibDbV2_Ccm_Matrix_Para_t *pCcmProfile2;
+    char CcmProf1Name[25];
+    char CcmProf2Name[25];
     float undampedCcmMatrix[9];
     float undampedCcOffset[3];
     float fScale;
@@ -68,6 +73,7 @@ typedef struct accm_rest_s {
     ccm_3ares_info_t res3a_info;
     int illuNum;
     ccm_calib_initlen_info_t ccm_calib_initlen_info;
+    yalp_tbl_info_t yalp_tbl_info;
 } accm_rest_t;
 
 typedef struct illu_node_s {
@@ -91,6 +97,11 @@ typedef struct accm_context_s {
     CalibDbV2_Ccm_Para_V32_t* ccm_v2;
     rk_aiq_ccm_cfg_v2_t ccmHwConf_v2;
     rk_aiq_ccm_v2_attrib_t mCurAttV2;
+#endif
+#if RKAIQ_HAVE_CCM_V3
+    CalibDbV2_Ccm_Para_V39_t* ccm_v3;
+    rk_aiq_ccm_cfg_v2_t ccmHwConf_v2;
+    rk_aiq_ccm_v3_attrib_t mCurAttV3;
 #endif
     const CalibDbV2_Ccm_Matrix_Para_t *pCcmMatrixAll[CCM_ILLUMINATION_MAX][CCM_PROFILES_NUM_MAX];// reorder para //to do, change to pointer
     accm_sw_info_t accmSwInfo;

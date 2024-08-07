@@ -37,6 +37,7 @@
 #endif
 #include "thumbnails.h"
 #include "CifScaleStream.h"
+#include "algos/aiisp/rk_aiisp.h"
 
 #include <unordered_map>
 
@@ -67,6 +68,7 @@ struct media_device;
 namespace RkCam {
 
 class IspParamsSplitter;
+class AiispLibrary;
 
 #define ISP20HW_SUBM (0x1)
 
@@ -113,6 +115,7 @@ public:
     virtual void setCalib(const CamCalibDbV2Context_t* calibv2) override;
     virtual XCamReturn applyAnalyzerResult(SmartPtr<SharedItemBase> base, bool sync) override;
     virtual XCamReturn applyAnalyzerResult(cam3aResultList& list) override;
+    virtual XCamReturn setUserOtpInfo(rk_aiq_user_otp_info_t otp_info) override;
     XCamReturn setModuleCtl(rk_aiq_module_id_t moduleId, bool en) override;
     XCamReturn getModuleCtl(rk_aiq_module_id_t moduleId, bool& en) override;
     XCamReturn notify_capture_raw() override;
@@ -168,6 +171,7 @@ public:
     XCamReturn showOtpAfData(struct rkmodule_af_inf *otp_af);
 #if RKAIQ_HAVE_PDAF
     bool get_pdaf_support() override;
+    PdafSensorType_t get_pdaf_type() override;
 #endif
     virtual XCamReturn setIspStreamMode(rk_isp_stream_mode_t mode) override {
         if (mode == RK_ISP_STREAM_MODE_ONLNIE) {
@@ -195,9 +199,13 @@ public:
     // cif scale flag
     XCamReturn setCifSclStartFlag(int ratio, bool mode);
     XCamReturn setFastAeExp(uint32_t frameId);
+    XCamReturn setLastAeExpToRttShared();
 
     XCamReturn setVicapStreamMode(int mode, bool is_single_mode);
-
+    void setListenStrmEvt(bool isListen) {
+        mIsListenStrmEvt = isListen;
+    }
+    XCamReturn setSnsSyncMode(uint32_t mode);
 private:
     using V4l2Device::start;
 
@@ -264,6 +272,7 @@ protected:
     volatile bool _is_exit;
     bool _linked_to_isp;
     bool _linked_to_1608;
+    bool _linked_to_serdes;
 #if defined(ISP_HW_V20)
     struct rkispp_params_cfg _full_active_ispp_params;
     uint32_t _ispp_module_init_ens;
@@ -277,6 +286,9 @@ public:
     static rk_aiq_cif_hw_info_t mCifHwInfos;
     static std::unordered_map<std::string, SmartPtr<rk_sensor_full_info_t>> mSensorHwInfos;
     static std::unordered_map<std::string, std::string> mFakeCameraName;
+    rk_aiq_aiisp_cfg_t mAiisp_cfg;
+    virtual XCamReturn read_aiisp_result() override;
+    virtual XCamReturn get_aiisp_bay3dbuf() override;
 protected:
     static bool mIsMultiIspMode;
     static uint16_t mMultiIspExtendedPixel;
@@ -311,6 +323,11 @@ protected:
     XCamReturn init_pp(rk_sensor_full_info_t *s_info);
 #endif
     virtual bool isOnlineByWorkingMode();
+    virtual XCamReturn setAiispMode(rk_aiq_aiisp_cfg_t* aiisp_cfg) override;
+#if defined(ISP_HW_V39)
+    virtual XCamReturn process_restriction(struct isp39_isp_params_cfg* isp_params);
+    virtual XCamReturn aiisp_processing(rk_aiq_aiisp_t* aiisp_evt) override;
+#endif
     enum mipi_stream_idx {
         MIPI_STREAM_IDX_0   = 1,
         MIPI_STREAM_IDX_1   = 2,
@@ -328,6 +345,7 @@ protected:
     rk_aiq_rotation_t _sharp_fbc_rotation;
 
     rk_aiq_ldch_share_mem_info_t ldch_mem_info_array[2 * ISP2X_MESH_BUF_NUM];
+    rk_aiq_ldcv_share_mem_info_t ldcv_mem_info_array[2 * ISP2X_MESH_BUF_NUM];
     rk_aiq_fec_share_mem_info_t fec_mem_info_array[FEC_MESH_BUF_NUM];
     rk_aiq_cac_share_mem_info_t cac_mem_info_array[2 * ISP3X_MESH_BUF_NUM];
     rk_aiq_dbg_share_mem_info_t dbg_mem_info_array[2 * RKISP_INFO2DDR_BUF_MAX];
@@ -337,6 +355,7 @@ protected:
         rk_aiq_drv_share_mem_type_t type;
     } drv_share_mem_ctx_t;
     drv_share_mem_ctx_t _ldch_drv_mem_ctx;
+    drv_share_mem_ctx_t _ldcv_drv_mem_ctx;
     drv_share_mem_ctx_t _fec_drv_mem_ctx;
     drv_share_mem_ctx_t _cac_drv_mem_ctx;
     drv_share_mem_ctx_t _dbg_drv_mem_ctx;
@@ -359,6 +378,7 @@ protected:
     SmartPtr<RKStatsStream>     mIspStatsStream;
     SmartPtr<RKStream>          mIspParamStream;
     SmartPtr<RKSofEventStream>  mIspSofStream;
+    SmartPtr<RKAiispEventStream>  mIspAiispStream;
 #if defined(RKAIQ_ENABLE_SPSTREAM)
     SmartPtr<SPStreamProcUnit> mSpStreamUnit;
 #endif
@@ -407,8 +427,41 @@ protected:
     bool use_rkrawstream;
 
     bool _not_skip_first{true};
+    void* _first_awb_cfg{NULL};
     uint32_t mAweekId{0};
     void* _skipped_params{NULL};
+    void* _first_awb_param{NULL};
+    RkAiqIspUnitedMode mIspUnitedMode;
+    bool mIsListenStrmEvt{true};
+
+    bool use_aiisp;
+    rk_aiisp_param* aiisp_param;
+    std::shared_ptr<AiispLibrary> lib_aiisp_;
+};
+
+using rk_aiisp_init = int (*)(rk_aiisp_param* param);
+using rk_aiisp_proc = int (*)(rk_aiisp_param* param);
+using rk_aiisp_deinit = int (*)(rk_aiisp_param* param);
+
+struct AiispOps {
+    rk_aiisp_init aiisp_init;
+    rk_aiisp_proc aiisp_proc;
+    rk_aiisp_deinit aiisp_deinit;
+};
+
+class AiispLibrary {
+public:
+    AiispLibrary() = default;
+    virtual ~AiispLibrary();
+
+    bool Init();
+    bool LoadSymbols();
+
+    AiispOps* GetOps();
+
+private:
+    void* handle_;
+    AiispOps ops_;
 };
 
 }

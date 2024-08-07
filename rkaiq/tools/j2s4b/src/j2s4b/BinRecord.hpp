@@ -27,8 +27,7 @@ public:
 
   ~BinMapLoader() = default;
 
-  static int suqeezBinMap(const char *fpath, uint8_t *buffer,
-                          size_t buffer_len);
+  static int suqeezBinMap(uint8_t *buffer, size_t *buffer_len);
 
   int saveFile(const char *fpath, void *buf, size_t file_size);
   int genBinary(void *buffer, size_t buffer_size);
@@ -47,6 +46,7 @@ public:
 
   void *loadWholeFile(const char *fpath, size_t *fsize);
   int loadFile(const char *filename);
+  int deinitBinStructMap(uint8_t *data, size_t len);
 
 private:
   uint8_t *struct_buffer;

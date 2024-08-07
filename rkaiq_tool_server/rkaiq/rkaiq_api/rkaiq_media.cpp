@@ -15,6 +15,8 @@ extern int g_width;
 extern int g_height;
 extern int g_device_id;
 extern int g_cam_count;
+extern std::string g_capture_dev_name;
+extern std::string g_stream_dev_name;
 
 std::string RKAiqMedia::GetSensorName(struct media_device* device, int cam_index)
 {
@@ -276,12 +278,13 @@ void RKAiqMedia::GetIspSubDevs(int id, struct media_device* device, const char* 
         }
         else
         {
-            if (g_width > format.width || g_height > format.height)
-            {
-                g_width = format.width;
-                g_height = format.height;
-                LOG_ERROR("fixup width %d height %d\n", g_width, g_height);
-            }
+            ;
+            // if (g_capture_dev_name.length() == 0 && g_stream_dev_name.length() == 0 && (g_width > format.width || g_height > format.height))
+            // {
+            //     g_width = format.width;
+            //     g_height = format.height;
+            //     LOG_ERROR("fixup width %d height %d\n", g_width, g_height);
+            // }
         }
     }
 
@@ -536,7 +539,7 @@ void RKAiqMedia::GetCifSubDevs(int id, struct media_device* device, const char* 
         entity_name = media_entity_get_devname(entity);
         if (entity_name)
         {
-            cif_info->rkcif_tools_id0 = entity_name;
+            cif_info->rkcif_tools_id1 = entity_name;
         }
     }
 
@@ -546,7 +549,7 @@ void RKAiqMedia::GetCifSubDevs(int id, struct media_device* device, const char* 
         entity_name = media_entity_get_devname(entity);
         if (entity_name)
         {
-            cif_info->rkcif_tools_id0 = entity_name;
+            cif_info->rkcif_tools_id2 = entity_name;
         }
     }
 
@@ -1160,7 +1163,7 @@ int RKAiqMedia::GetMediaInfo()
         {
             GetCifSubDevs(id, device, sys_path);
         }
-        else if (strcmp(device->info.model, "rkcif_dvp") == 0)
+        else if (strcmp(device->info.model, "rkcif_dvp") == 0 || strcmp(device->info.model, "rkcif-dvp") == 0)
         {
             GetDvpSubDevs(id, device, sys_path);
         }

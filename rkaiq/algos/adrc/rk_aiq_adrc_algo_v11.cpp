@@ -354,7 +354,7 @@ void AdrcGetTuningProcResV11(AdrcContext_t* pAdrcCtx, RkAiqAdrcProcResult_t* pAd
 
     pAdrcProcRes->DrcProcRes.Drc_v11.bilat_wt_off =
         SW_DRC_BILAT_WT_OFF_FIX;  // LIMIT_VALUE(pAdrcCtx->NextData.dynParams.Drc_v11.MotionStr
-                                  // *INT8BITMAX, INT8BITMAX, 0);
+                                  // *BIT_8_MAX, BIT_8_MAX, 0);
     pAdrcProcRes->DrcProcRes.Drc_v11.weicur_pix =
         (unsigned char)(SHIFT8BIT(pAdrcCtx->NextData.staticParams.curPixWeit) + 0.5f);
     pAdrcProcRes->DrcProcRes.Drc_v11.weipre_frame =
@@ -614,16 +614,19 @@ void AdrcTuningParaProcessing(AdrcContext_t* pAdrcCtx, RkAiqAdrcProcResult_t* pA
     // clip drc gain
     if (pAdrcCtx->NextData.AEData.L2S_Ratio * pAdrcCtx->NextData.dynParams.Drc_v11.DrcGain >
         MAX_AE_DRC_GAIN) {
-        LOGE_ATMO("%s:  AERatio*DrcGain > 256!!!\n", __FUNCTION__);
         pAdrcCtx->NextData.dynParams.Drc_v11.DrcGain =
             MAX(MAX_AE_DRC_GAIN / pAdrcCtx->NextData.AEData.L2S_Ratio, GAINMIN);
+        LOGI_ATMO("%s:  AERatio*DrcGain > 256x, clip to %f!!!\n", __FUNCTION__,
+                  pAdrcCtx->NextData.dynParams.Drc_v11.DrcGain);
     }
 
-    LOGD_ATMO("%s: Current Enable:%d DrcGain:%f Alpha:%f Clip:%f Strength:%f CompressMode:%d\n",
-              __FUNCTION__, pAdrcProcRes->bDrcEn, pAdrcCtx->NextData.dynParams.Drc_v11.DrcGain,
-              pAdrcCtx->NextData.dynParams.Drc_v11.Alpha, pAdrcCtx->NextData.dynParams.Drc_v11.Clip,
-              pAdrcCtx->NextData.dynParams.Drc_v11.Strength,
-              pAdrcCtx->NextData.staticParams.CompressMode);
+    LOGD_ATMO(
+        "%s: Current Enable:%d DrcGain:%f Alpha:%f Clip:%f Strength:%f CompressMode:%d "
+        "OutPutLongFrame:%d\n",
+        __FUNCTION__, pAdrcProcRes->bDrcEn, pAdrcCtx->NextData.dynParams.Drc_v11.DrcGain,
+        pAdrcCtx->NextData.dynParams.Drc_v11.Alpha, pAdrcCtx->NextData.dynParams.Drc_v11.Clip,
+        pAdrcCtx->NextData.dynParams.Drc_v11.Strength, pAdrcCtx->NextData.staticParams.CompressMode,
+        pAdrcCtx->NextData.staticParams.OutPutLongFrame);
     LOGD_ATMO(
         "%s: Current LocalWeit:%f LocalAutoEnable:%d LocalAutoWeit:%f GlobalContrast:%f "
         "LoLitContrast:%f\n",

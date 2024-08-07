@@ -8,7 +8,6 @@
 
 extern uint32_t g_sensorHdrMode;
 extern int g_sensorMemoryMode;
-int g_frameDroppedFlag = 0;
 uint g_lastCapturedSequense = 0;
 
 void process_image(struct capture_info* cap_info, const void* p, int size)
@@ -61,7 +60,7 @@ int read_frame(struct capture_info* cap_info)
             if (device_dqbuf(cap_info->dev_fd, &buf) == -1)
                 break;
 
-            LOG_INFO("RAW capture, sequence:%u\n", buf.sequence);
+            // LOG_INFO("RAW capture, sequence:%u\n", buf.sequence);
             cap_info->sequence = buf.sequence;
             assert(buf.index < cap_info->n_buffers);
 
@@ -145,16 +144,8 @@ int read_frame(int handler, int index, struct capture_info* cap_info, CaptureCal
             if (device_dqbuf(cap_info->dev_fd, &buf) == -1)
                 break;
 
-            LOG_INFO("RAW capture, sequence:%u\n", buf.sequence);
+            // LOG_INFO("RAW capture, sequence:%u\n", buf.sequence);
             cap_info->sequence = buf.sequence;
-            if (g_lastCapturedSequense != 0 && buf.sequence - g_lastCapturedSequense > 5)
-            {
-                g_frameDroppedFlag = 1;
-            }
-            else
-            {
-                g_frameDroppedFlag = 0;
-            }
             g_lastCapturedSequense = buf.sequence;
 
             assert(buf.index < cap_info->n_buffers);

@@ -97,6 +97,7 @@ class RkAiqCore;
 class MessageThread;
 class RkAiqAnalyzerGroup;
 class RkAiqAnalyzeGroupManager;
+class GlobalParamsManager;
 
 class RkAiqAnalyzerCb {
 public:
@@ -218,6 +219,9 @@ public:
 
 #ifdef RKAIQ_ENABLE_CAMGROUP
     void setCamGroupManager(RkAiqCamGroupManager* cam_group_manager);
+    const RkAiqCamGroupManager* GetCamGroupManager() {
+        return mCamGroupCoreManager;
+    }
 #endif
     // called only once
     XCamReturn init(const char* sns_ent_name, const CamCalibDbContext_t* aiqCalib,
@@ -252,6 +256,8 @@ public:
     XCamReturn addAlgo(RkAiqAlgoDesComm& algo);
     XCamReturn enableAlgo(int algoType, int id, bool enable);
     XCamReturn rmAlgo(int algoType, int id);
+    XCamReturn register3Aalgo(void* algoDes, void* cbs);
+    XCamReturn unregister3Aalgo(int algoType);
     bool getAxlibStatus(int algoType, int id);
     RkAiqAlgoContext* getEnabledAxlibCtx(const int algo_type);
     RkAiqAlgoContext* getAxlibCtx(const int algo_type, const int lib_id);
@@ -288,7 +294,7 @@ public:
     XCamReturn setCalib(const CamCalibDbV2Context_t* aiqCalib);
     XCamReturn events_analyze(const SmartPtr<ispHwEvt_t> &evts);
     XCamReturn calibTuning(const CamCalibDbV2Context_t* aiqCalib,
-                           ModuleNameList& change_list);
+                           TuningCalib* change_name_list);
     XCamReturn setMemsSensorIntf(const rk_aiq_mems_sensor_intf_t* intf);
     const rk_aiq_mems_sensor_intf_t* getMemsSensorIntf();
     XCamReturn set_sp_resolution(int &width, int &height, int &aligned_w, int &aligned_h);
@@ -307,9 +313,17 @@ public:
 #if RKAIQ_HAVE_PDAF
     XCamReturn set_pdaf_support(bool support);
     bool get_pdaf_support();
+    XCamReturn set_pdaf_type(PdafSensorType_t type);
+    PdafSensorType_t get_pdaf_type();
 #endif
+    void setGlobalParamsManager(GlobalParamsManager* globalParamsManger) {
+        mGlobalParamsManger = globalParamsManger;
+    }
     XCamReturn setAOVForAE(bool en);
 
+    GlobalParamsManager* getGlobalParamsManager() {
+        return mGlobalParamsManger;
+    }
 public:
     // following vars shared by all algo handlers
     typedef struct RkAiqAlgosComShared_s {
@@ -341,6 +355,7 @@ public:
         int spAlignedWidth;
         int spAlignedHeight;
         int mCamPhyId;
+        uint8_t hdr_mode;
 
         void reset() {
             xcam_mem_clear(ctxCfigs);
@@ -376,6 +391,7 @@ public:
         int32_t groupId;
         uint32_t frameId;
         int64_t sof;
+        int iso;
         XCamVideoBuffer* ispStats;
         RKAiqAecExpInfo_t preExp;
         RKAiqAecExpInfo_t curExp;
@@ -397,15 +413,19 @@ public:
         RkAiqResComb res_comb;
         rk_aiq_scale_raw_info_t scaleRawInfo;
         RkAiqFullParams* fullParams;
+        Mutex bay3dStatListMutex{false};
+        std::list<SmartPtr<RkAiqBay3dStat>> bay3dStatList;
         void reset() {
             frameId = 0;
             sof     = 0;
+            iso     = 0;
             xcam_mem_clear(res_comb);
             xcam_mem_clear(amdResParams);
             xcam_mem_clear(preExp);
             xcam_mem_clear(curExp);
             xcam_mem_clear(nxtExp);
             xcam_mem_clear(scaleRawInfo);
+            bay3dStatList.clear();
             ispStats = nullptr;
             sp = nullptr;
             ispGain = nullptr;
@@ -430,6 +450,9 @@ public:
     // key: algo type
     std::map<int32_t, uint64_t> mAlgoTypeToGrpMaskMap;
 
+    // for handler access
+    SmartPtr<RkAiqFullParamsProxy> mAiqCurParams;
+
     isp_drv_share_mem_ops_t *mShareMemOps;
 
     void post_message (RkAiqCoreVdBufMsg& msg);
@@ -448,11 +471,11 @@ public:
     XCamReturn updateCalibDbBrutal(CamCalibDbV2Context_t* aiqCalib);
     void setDelayCnts(int8_t delayCnts);
     void setVicapScaleFlag(bool mode);
-    void setTbInfo(rk_aiq_tb_info_t& info) {
+    void setTbInfo(RkAiqTbInfo_t& info) {
         mTbInfo = info;
     }
 
-    rk_aiq_tb_info_t* getTbInfo(void) {
+    RkAiqTbInfo_t* getTbInfo(void) {
         return &mTbInfo;
     }
 
@@ -464,6 +487,7 @@ public:
     void awakenClean(uint32_t sequeence);
     XCamReturn setUserOtpInfo(rk_aiq_user_otp_info_t otp_info);
 
+    bool isGroupAlgo(int algoType);
 protected:
     // in analyzer thread
     XCamReturn analyze(const SmartPtr<VideoBuffer> &buffer);
@@ -519,7 +543,7 @@ protected:
     std::list<SmartPtr<RkAiqHandle>> mCurIspAlgoHandleList;
 
     SmartPtr<RkAiqFullParamsPool> mAiqParamsPool;
-    SmartPtr<RkAiqFullParamsProxy> mAiqCurParams;
+    //SmartPtr<RkAiqFullParamsProxy> mAiqCurParams;
     SmartPtr<RkAiqExpParamsPool> mAiqExpParamsPool;
     SmartPtr<RkAiqIrisParamsPool> mAiqIrisParamsPool;
     SmartPtr<RkAiqFocusParamsPool> mAiqFocusParamsPool;
@@ -566,45 +590,37 @@ protected:
 
     // TODO: change full params to list
     // V21 differential modules
-    SmartPtr<RkAiqIspAwbParamsPoolV21>     mAiqIspAwbV21ParamsPool;
-    SmartPtr<RkAiqIspDrcParamsPool>        mAiqIspDrcParamsPool;
-    SmartPtr<RkAiqIspBlcParamsPoolV21>     mAiqIspBlcV21ParamsPool;
-    SmartPtr<RkAiqIspBaynrParamsPoolV21>   mAiqIspBaynrV21ParamsPool;
-    SmartPtr<RkAiqIspBa3dParamsPoolV21>    mAiqIspBa3dV21ParamsPool;
-    SmartPtr<RkAiqIspYnrParamsPoolV21>     mAiqIspYnrV21ParamsPool;
-    SmartPtr<RkAiqIspCnrParamsPoolV21>     mAiqIspCnrV21ParamsPool;
-    SmartPtr<RkAiqIspSharpenParamsPoolV21> mAiqIspSharpenV21ParamsPool;
+    SmartPtr<RkAiqIspDrcParamsPool>         mAiqIspDrcParamsPool;
+    SmartPtr<RkAiqIspBaynrParamsPool>       mAiqIspBaynrParamsPool;
+    SmartPtr<RkAiqIspBa3dParamsPool>        mAiqIspBa3dParamsPool;
+    SmartPtr<RkAiqIspCnrParamsPool>         mAiqIspCnrParamsPool;
 
     // V30
-    SmartPtr<RkAiqIspAwbParamsPoolV3x>         mAiqIspAwbV3xParamsPool;
-    SmartPtr<RkAiqIspAfParamsPoolV3x>          mAiqIspAfV3xParamsPool;
-    SmartPtr<RkAiqIspCacParamsPoolV3x>         mAiqIspCacV3xParamsPool;
-    SmartPtr<RkAiqIspGainParamsPoolV3x>        mAiqIspGainV3xParamsPool;
-    SmartPtr<RkAiqIspBaynrParamsPoolV3x>       mAiqIspBaynrV3xParamsPool;
-    SmartPtr<RkAiqIspBa3dParamsPoolV3x>        mAiqIspBa3dV3xParamsPool;
-    SmartPtr<RkAiqIspYnrParamsPoolV3x>         mAiqIspYnrV3xParamsPool;
-    SmartPtr<RkAiqIspCnrParamsPoolV3x>         mAiqIspCnrV3xParamsPool;
-    SmartPtr<RkAiqIspSharpenParamsPoolV3x>     mAiqIspSharpenV3xParamsPool;
-    SmartPtr<RkAiqIspTnrParamsPoolV3x>         mAiqIspTnrV3xParamsPool;
-
+#if RKAIQ_HAVE_CAC
+    SmartPtr<RkAiqIspCacParamsPool>         mAiqIspCacParamsPool;
+#endif
     // V32
-    SmartPtr<RkAiqIspBlcParamsPoolV32>      mAiqIspBlcV32ParamsPool;
-    SmartPtr<RkAiqIspBaynrParamsPoolV32>    mAiqIspBaynrV32ParamsPool;
-    SmartPtr<RkAiqIspCacParamsPoolV32>      mAiqIspCacV32ParamsPool;
-    SmartPtr<RkAiqIspDebayerParamsPoolV32>  mAiqIspDebayerV32ParamsPool;
-    SmartPtr<RkAiqIspCcmParamsPoolV32>      mAiqIspCcmV32ParamsPool;
-    SmartPtr<RkAiqIspLdchParamsPoolV32>     mAiqIspLdchV32ParamsPool;
-    SmartPtr<RkAiqIspYnrParamsPoolV32>      mAiqIspYnrV32ParamsPool;
-    SmartPtr<RkAiqIspCnrParamsPoolV32>      mAiqIspCnrV32ParamsPool;
-    SmartPtr<RkAiqIspSharpParamsPoolV32>    mAiqIspSharpV32ParamsPool;
-    SmartPtr<RkAiqIspAwbParamsPoolV32>      mAiqIspAwbV32ParamsPool;
-    SmartPtr<RkAiqIspAfParamsPoolV32>       mAiqIspAfV32ParamsPool;
-    SmartPtr<RkAiqIspTnrParamsPoolV32>      mAiqIspTnrV32ParamsPool;
-    SmartPtr<RkAiqIspAwbGainParamsPoolV32>  mAiqIspAwbGainV32ParamsPool;
-
-    SmartPtr<RkAiqIspAfParamsPoolV32Lite>   mAiqIspAfV32LiteParamsPool;
-
     SmartPtr<RkAiqIspAfdParamsPool>         mAiqIspAfdParamsPool;
+
+    // V39
+#if RKAIQ_HAVE_YUVME
+    SmartPtr<RkAiqIspYuvmeParamsPool>    mAiqIspYuvmeParamsPool;
+#endif
+#if RKAIQ_HAVE_RGBIR_REMOSAIC
+    SmartPtr<RkAiqIspRgbirParamsPool> mAiqIspRgbirParamsPool;
+#endif
+    // for new struct
+#if USE_NEWSTRUCT
+    SmartPtr<RkAiqIspAeStatsCfgPool>  mAiqIspAeStatsCfgPool;
+    SmartPtr<RkAiqIspDmParamsPool>  mAiqIspDmParamsPool;
+    SmartPtr<RkAiqIspBtnrParamsPool>  mAiqIspBtnrParamsPool;
+    SmartPtr<RkAiqIspGammaParamsPool>  mAiqIspGammaParamsPool;
+    SmartPtr<RkAiqIspSharpParamsPool>  mAiqIspSharpParamsPool;
+    SmartPtr<RkAiqIspYmeParamsPool>  mAiqIspYmeParamsPool;
+#endif
+#if RKAIQ_HAVE_LDC
+    SmartPtr<RkAiqIspLdcParamsPool> mAiqIspLdcParamsPool;
+#endif
 
 #endif
     static uint16_t DEFAULT_POOL_SIZE;
@@ -680,6 +696,7 @@ protected:
 #endif
     XCamReturn handleOrbStats(const SmartPtr<VideoBuffer> &buffer);
     XCamReturn handlePdafStats(const SmartPtr<VideoBuffer> &buffer);
+    XCamReturn handleBay3dStats(const SmartPtr<VideoBuffer> &buffer);
     inline uint64_t grpId2GrpMask(uint32_t grpId) {
         return grpId == RK_AIQ_CORE_ANALYZE_ALL ? (uint64_t)grpId : (1ULL << grpId);
     }
@@ -688,7 +705,6 @@ protected:
     std::bitset<RK_AIQ_ALGO_TYPE_MAX> getReqAlgoResMask(int algoType);
     void setReqAlgoResMask(int algoType, bool req);
 
-    bool isGroupAlgo(int algoType);
     void getDummyAlgoRes(int type, uint32_t frame_id);
 
     SmartPtr<IRkAiqResourceTranslator> mTranslator;
@@ -697,6 +713,9 @@ protected:
     RkAiqCamGroupManager* mCamGroupCoreManager;
 #endif
     std::bitset<RK_AIQ_ALGO_TYPE_MAX> mAllReqAlgoResMask {0};
+
+    XCamReturn fixAiqParamsIsp(RkAiqFullParams* aiqParams);
+    void ClearBay3dStatsList();
 
 private:
 #if defined(RKAIQ_HAVE_THUMBNAILS)
@@ -713,9 +732,10 @@ private:
     XCamReturn notifyUpdate(uint64_t mask);
     XCamReturn waitUpdateDone();
     uint64_t groupUpdateMask;
-    rk_aiq_tb_info_t mTbInfo;
+    RkAiqTbInfo_t mTbInfo;
 
     bool mPdafSupport{false};
+    PdafSensorType_t mPdafType{PDAF_SENSOR_TYPE2};
     int64_t mFrmInterval = 30000LL;
     int64_t mSofTime = 0LL;
     int64_t mAfStatsTime[2] {0};
@@ -724,6 +744,7 @@ private:
     uint32_t mPdafStatsFrmId[2] {(uint32_t) -1, (uint32_t) -1};
     SmartPtr<RkAiqAfStatsProxy> mAfStats[2];
     SmartPtr<RkAiqPdafStatsProxy> mPdafStats[2];
+    XCam::Mutex mPdafStatsMutex;
     CamProfiles mProfiles;
     SmartPtr<RkAiqVicapRawBuf_t> mVicapBufs;
     bool mIsEnableVicap{false};
@@ -741,8 +762,11 @@ private:
     uint32_t mLatestEvtsId {0};
     uint32_t mLatestStatsId {0};
     std::list<RkAiqAlgoType_t> mUpdateCalibAlgosList;
-    void mapModStrListToEnum(ModuleNameList& change_name_list);
+    void mapModStrListToEnum(TuningCalib* change_name_list);
     rk_aiq_user_otp_info_t mUserOtpInfo;
+    GlobalParamsManager* mGlobalParamsManger {NULL};
+    bool mIsAeResgister{false};
+    bool mIsAwbResgister{false};
 };
 
 }

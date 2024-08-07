@@ -18,8 +18,8 @@
 #ifndef _RK_AIQ_H_
 #define _RK_AIQ_H_
 
-#include "base/xcam_common.h"
-#include "rk_aiq_types.h"
+#include "xcore/base/xcam_common.h"
+#include "common/rk_aiq_types.h"
 
 XCAM_BEGIN_DECLARE
 
@@ -59,8 +59,8 @@ typedef struct rk_aiq_err_msg_s {
     int err_code;
 } rk_aiq_err_msg_t;
 
-typedef struct rk_aiq_ver_info_s{
-    char aiq_ver[16];
+typedef struct rk_aiq_ver_info_s {
+    char aiq_ver[32];
     char iq_parser_ver[16];
     uint32_t iq_parser_magic_code;
     char awb_algo_ver[16];
@@ -69,9 +69,26 @@ typedef struct rk_aiq_ver_info_s{
     char ahdr_algo_ver[16];
 } rk_aiq_ver_info_t;
 
-typedef XCamReturn (*rk_aiq_error_cb)(rk_aiq_err_msg_t* err_msg);
-typedef XCamReturn (*rk_aiq_metas_cb)(rk_aiq_metas_t* metas);
-typedef XCamReturn (*rk_aiq_hwevt_cb)(rk_aiq_hwevt_t* hwevt);
+typedef struct rk_aiq_aiisp_s {
+    uint16_t wr_linecnt;
+    uint16_t rd_linecnt;
+    int sequence;
+    int height;
+    rkisp_bay3dbuf_info_t bay3dbuf;
+    void* iir_address;
+    void* gain_address;
+    void* aiisp_address;
+} rk_aiq_aiisp_t;
+
+typedef XCamReturn(*rk_aiq_error_cb)(rk_aiq_err_msg_t* err_msg);
+typedef XCamReturn(*rk_aiq_metas_cb)(rk_aiq_metas_t* metas);
+typedef XCamReturn(*rk_aiq_hwevt_cb)(rk_aiq_hwevt_t* hwevt);
+typedef XCamReturn(*rk_aiq_aiisp_cb)(rk_aiq_aiisp_t* aiisp_evt, void* ctx);
+
+typedef struct rk_aiq_aiispCtx_s {
+    rk_aiq_aiisp_cb mAiispEvtcb;
+    void* ctx;
+} rk_aiq_aiispCtx_t;
 
 typedef enum rk_aiq_cam_type_e {
     RK_AIQ_CAM_TYPE_SINGLE,
@@ -79,30 +96,25 @@ typedef enum rk_aiq_cam_type_e {
 } rk_aiq_cam_type_t;
 
 typedef struct rk_aiq_iq_buffer_info_s {
-    void *addr;
+    void* addr;
     size_t len;
 } rk_aiq_iq_buffer_info_t;
-
-typedef enum rk_aiq_prd_type_e {
-    RK_AIQ_PRD_TYPE_NORMAL,
-    RK_AIQ_PRD_TYPE_TB_BATIPC,
-    RK_AIQ_PRD_TYPE_TB_DOORLOCK,
-    RK_AIQ_PRD_TYPE_SINGLE_FRAME,
-} rk_aiq_prd_type_t;
 
 typedef enum rk_aiq_iq_bin_mode_s {
     RK_AIQ_META_FULL_IQ_BIN = 0,
     RK_AIQ_META_NOT_FULL_IQ_BIN,
 } rk_aiq_iq_bin_mode_t;
 
+#if 0
 typedef struct rk_aiq_tb_info_s {
     uint16_t magic;
     bool is_pre_aiq;
     uint8_t prd_type;
     bool is_start_once;
     uint8_t iq_bin_mode;
-    void *rtt_share_addr;
+    void* rtt_share_addr;
 } rk_aiq_tb_info_t;
+#endif
 
 XCAM_END_DECLARE
 

@@ -148,7 +148,7 @@ public:
     }
     virtual int getCamPhyId() { return mCamPhyId;}
     virtual void setGroupMode(bool bGroup, bool bMain) { mIsGroupMode = bGroup; mIsMain = bMain;}
-    virtual void setTbInfo(rk_aiq_tb_info_t& info) {
+    virtual void setTbInfo(RkAiqTbInfo_t& info) {
         mTbInfo = info;
     }
     virtual void setDevBufCnt(const std::map<std::string, int>& dev_buf_cnt_map) {
@@ -166,6 +166,29 @@ public:
     virtual void setRawStreamInfo(rk_aiq_rkrawstream_info_t *info) {
         mRawStreamInfo = *info;
     }
+    virtual XCamReturn setAiispMode(rk_aiq_aiisp_cfg_t *aiisp_cfg)
+    {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+    virtual XCamReturn read_aiisp_result()
+    {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+    virtual XCamReturn get_aiisp_bay3dbuf()
+    {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+    virtual XCamReturn aiisp_processing(rk_aiq_aiisp_t* aiisp_evt)
+    {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
+    virtual void setRkAiqManager(RkAiqManager *rkAiqManager)
+    {
+        this->rkAiqManager = rkAiqManager;
+    }
+    virtual XCamReturn setUserOtpInfo(rk_aiq_user_otp_info_t otp_info) {
+        return XCAM_RETURN_ERROR_FAILED;
+    }
     HwResListener* mHwResLintener;
 
 protected:
@@ -178,6 +201,7 @@ protected:
     SmartPtr<V4l2SubDevice> mLensDev;
     SmartPtr<V4l2SubDevice> mIrcutDev;
     SmartPtr<V4l2Device> mIspSpDev;
+    SmartPtr<V4l2SubDevice> mVicapItfDev;
 #ifndef RK_SIMULATOR_HW
     SmartPtr<FlashLightHw> mFlashLight;
     SmartPtr<FlashLightHw> mFlashLightIr;
@@ -189,9 +213,10 @@ protected:
     int mCamPhyId;
     bool mIsGroupMode;
     bool mIsMain;
-    rk_aiq_tb_info_t mTbInfo;
+    RkAiqTbInfo_t mTbInfo;
     std::map<std::string, int> mDevBufCntMap;
     rk_aiq_rkrawstream_info_t mRawStreamInfo;
+    RkAiqManager* rkAiqManager;
 
  private:
     XCAM_DEAD_COPY (CamHwBase);

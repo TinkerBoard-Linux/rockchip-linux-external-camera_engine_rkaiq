@@ -236,15 +236,32 @@ int BinMapLoader::suqeezBinMapOne() {
   return -1;
 }
 
-int BinMapLoader::suqeezBinMap(const char *fpath, uint8_t *buffer,
-                               size_t buffer_len) {
+int BinMapLoader::deinitBinStructMap(uint8_t *data, size_t len)
+{
+    size_t map_len = *(size_t *)(data + (len - sizeof(size_t)));
+    size_t map_offset = *(size_t *)(data + (len - sizeof(size_t) * 2));
+    size_t map_index = 0;
+    map_index_t *map_addr = NULL;
+
+    map_addr = (map_index_t *)(data + map_offset);
+    for (map_index = 0; map_index < map_len; map_index++) {
+        map_index_t tmap = (map_addr[map_index]);
+        void** dst_obj_addr = (void**)(data + (size_t)tmap.dst_offset);
+        *dst_obj_addr = NULL;
+    }
+
+    return 0;
+}
+
+int BinMapLoader::suqeezBinMap(uint8_t *buffer, size_t *buffer_len)
+{
   int ret = -1;
   uint8_t *inp_buff = NULL;
   uint8_t *out_buff = NULL;
   size_t inp_size = 0;
   size_t final_size = 0;
 
-  if (buffer_len > MAX_IQBIN_SIZE) {
+  if (*buffer_len > MAX_IQBIN_SIZE) {
     printf("[BIN] %s %d:iq binary too large!\n", __func__, __LINE__);
     return -1;
   }
@@ -252,7 +269,7 @@ int BinMapLoader::suqeezBinMap(const char *fpath, uint8_t *buffer,
   inp_buff = buffer;
   out_buff = buffer;
 
-  inp_size = buffer_len;
+  inp_size = *buffer_len;
   do {
     BinMapLoader *loader = new BinMapLoader(inp_buff, inp_size);
     loader->parseBinStructMap(inp_buff, inp_size);
@@ -263,7 +280,8 @@ int BinMapLoader::suqeezBinMap(const char *fpath, uint8_t *buffer,
     inp_size = final_size;
 
     if (ret != 0) {
-      loader->saveFile(fpath, out_buff, final_size);
+      loader->deinitBinStructMap(inp_buff, inp_size);
+      *buffer_len = final_size;
     }
     delete loader;
     loader = NULL;
