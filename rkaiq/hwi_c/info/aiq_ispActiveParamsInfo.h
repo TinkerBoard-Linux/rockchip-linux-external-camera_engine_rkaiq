@@ -16,16 +16,11 @@
  *
  */
 
-#ifndef _AIQ_SENSOR_HW_INFO_H_
-#define _AIQ_SENSOR_HW_INFO_H_
+#ifndef _AIQ_ISP_ACTIVE_PARAMS_INFO_H_
+#define _AIQ_ISP_ACTIVE_PARAMS_INFO_H_
 
-#include "hwi_c/aiq_sensorHw.h"
+#include "st_string.h"
 
-void sensor_dump_mod_param(AiqSensorHw_t* self, st_string* result);
-void sensor_dump_dev_attr1(AiqSensorHw_t* self, st_string* result);
-void sensor_dump_dev_attr2(AiqSensorHw_t* self, st_string* result);
-void sensor_dump_reg_effect_delay(AiqSensorHw_t* self, st_string* result);
-void sensor_dump_exp_list_size(AiqSensorHw_t* self, st_string* result);
-void sensor_dump_configured_exp(AiqSensorHw_t* self, st_string* result);
+int active_isp_params_dump(void* dumper, st_string* result, int argc, void* argv[]);
 
-#endif  // _AIQ_SENSOR_HW_INFO_H_
+#endif  //  _AIQ_ISP_ACTIVE_PARAMS_INFO_H_
