@@ -45,6 +45,12 @@
 #include "uAPI2/rk_aiq_user_api2_awb_v3.h"
 
 #include "uAPI2/rk_aiq_user_ae_thread_v25_itf.h"
+#include "uAPI2/rk_aiq_user_api2_stats.h"
+
+#if RKAIQ_HAVE_DUMPSYS
+#include "rk_aiq_registry.h"
+#include "rk_ipcs_service.h"
+#endif
 
 int g_rkaiq_isp_hw_ver = 0;
 static bool g_bypass_uapi = false;
@@ -556,17 +562,6 @@ rk_aiq_uapi2_sysctl_getCamInfos(const rk_aiq_sys_ctx_t* sys_ctx, rk_aiq_ctx_camI
     return ret;
 }
 
-/*
- * timeout: -1 next, 0 current, > 0 wait next until timeout
- */
-XCamReturn
-rk_aiq_uapi2_sysctl_getIspStats(const rk_aiq_sys_ctx_t* ctx,
-                              rk_aiq_isp_stats_t *stats, int timeout_ms)
-{
-	RKAIQ_API_SMART_LOCK(ctx);
-	return AiqCore_get3AStats(ctx->_analyzer, stats, timeout_ms);
-}
-
 XCamReturn
 rk_aiq_uapi2_sysctl_getWorkingMode(const rk_aiq_sys_ctx_t* ctx, rk_aiq_working_mode_t *mode)
 {
@@ -688,16 +683,25 @@ rk_aiq_uapi2_sysctl_resetCam(const rk_aiq_sys_ctx_t* sys_ctx, int camId)
 static void
 rk_aiq_uapi2_sysctl_deinit_locked(rk_aiq_sys_ctx_t* ctx)
 {
+#if RKAIQ_HAVE_DUMPSYS
+    aiq_ipcs_exit();
+    RKAIQRegistry_deinit();
+#endif
+
     if (ctx->_rkAiqManager) {
         AiqManager_deinit(ctx->_rkAiqManager);
 		aiq_free(ctx->_rkAiqManager);
 	}
 
-	if (ctx->_camHw)
-		aiq_free(ctx->_camHw);
+    if (ctx->_camHw) {
+        aiq_free(ctx->_camHw);
+        ctx->_camHw = NULL;
+    }
 
-	if (ctx->_analyzer)
-		aiq_free(ctx->_analyzer);
+    if (ctx->_analyzer) {
+        aiq_free(ctx->_analyzer);
+        ctx->_analyzer = NULL;
+    }
 
     if (ctx->_socket) {
         socket_client_exit(ctx->_socket);
@@ -736,9 +740,9 @@ rk_aiq_uapi2_sysctl_deinit(rk_aiq_sys_ctx_t* ctx)
     ENTER_XCORE_FUNCTION();
     {
         RKAIQ_API_SMART_LOCK(ctx);
+        rk_aiq_uapi2_awb_unRegister(ctx);
+        rk_aiq_uapi2_ae_unRegister(ctx);
         rk_aiq_uapi2_sysctl_deinit_locked(ctx);
-		rk_aiq_uapi2_awb_unRegister(ctx);
-		rk_aiq_uapi2_ae_unRegister(ctx);
 		aiqMutex_deInit(&ctx->_apiMutex);
     }
     aiq_free(ctx);
@@ -1198,6 +1202,14 @@ rk_aiq_uapi2_sysctl_init(const char* sns_ent_name,
     rk_aiq_uapi2_awb_register(ctx, NULL);
     rk_aiq_uapi2_ae_register(ctx, NULL);
 
+#if RKAIQ_HAVE_DUMPSYS
+    if (!is_group_mode) {
+        aiq_ipcs_init();
+        RKAIQRegistry_init();
+        RKAIQRegistry_register(ctx);
+    }
+#endif
+
     LOGK("cid[%d] %s success. iq:%s", ctx->_camPhyId, __func__, config_file);
     EXIT_XCORE_FUNCTION();
 
@@ -1222,6 +1234,7 @@ rk_aiq_uapi2_sysctl_prepare(const rk_aiq_sys_ctx_t* ctx,
             LOGE_ANALYZER("Aiisp does not supported HDR mode !");
             return XCAM_RETURN_ERROR_FAILED;
         }
+#ifdef RKAIQ_HAVE_RGBIR_REMOSAIC
         rk_aiq_global_params_wrap_t rgbir_params;
         rgbir_params.type = RESULT_TYPE_RGBIR_PARAM;
         rgbir_params.man_param_ptr = NULL;
@@ -1231,6 +1244,7 @@ rk_aiq_uapi2_sysctl_prepare(const rk_aiq_sys_ctx_t* ctx,
             LOGE_ANALYZER("Rgbir does not supported HDR mode !");
             return XCAM_RETURN_ERROR_FAILED;
         }
+#endif
     }
 
     if (ctx->_use_aiisp) {
@@ -1500,10 +1514,12 @@ rk_aiq_uapi2_sysctl_getModuleEn(const rk_aiq_sys_ctx_t* ctx,
     mod->module_ctl[RESULT_TYPE_AEC_PARAM].en = mode == OP_AUTO ? 1 : 0;
     mod->module_ctl[RESULT_TYPE_AEC_PARAM].bypass = 0;
     mod->module_ctl[RESULT_TYPE_AEC_PARAM].opMode = mode == OP_AUTO ? RK_AIQ_OP_MODE_AUTO : RK_AIQ_OP_MODE_MANUAL;
-    rk_aiq_uapi2_getWBMode(sys_ctx, &mode);
-    mod->module_ctl[RESULT_TYPE_AWB_PARAM].en = mode == OP_AUTO ? 1 : 0;
-    mod->module_ctl[RESULT_TYPE_AWB_PARAM].bypass = 0;
-    mod->module_ctl[RESULT_TYPE_AWB_PARAM].opMode = mode == OP_AUTO ? RK_AIQ_OP_MODE_AUTO : RK_AIQ_OP_MODE_MANUAL;
+    // rk_aiq_uapi2_getWBMode(sys_ctx, &mode);
+    awb_gainCtrl_t attr;
+    ret = rk_aiq_user_api2_awb_GetWbGainCtrlAttrib(ctx, &attr);
+    mod->module_ctl[RESULT_TYPE_AWB_PARAM].en = attr.opMode == RK_AIQ_OP_MODE_AUTO ? 1 : 0;
+    mod->module_ctl[RESULT_TYPE_AWB_PARAM].bypass = attr.byPass;
+    mod->module_ctl[RESULT_TYPE_AWB_PARAM].opMode = attr.opMode;
 #ifdef RKAIQ_HAVE_AF
     rk_aiq_uapi2_getFocusMode(sys_ctx, &mode);
     mod->module_ctl[RESULT_TYPE_AF_PARAM].en = mode == OP_AUTO ? 1 : 0;
@@ -1539,12 +1555,11 @@ rk_aiq_uapi2_sysctl_setModuleEn(const rk_aiq_sys_ctx_t* ctx,
             }
         }
         else if (cur_type == RESULT_TYPE_AWB_PARAM) {
-            if (mod->module_ctl[i].opMode == RK_AIQ_OP_MODE_AUTO) {
-                rk_aiq_uapi2_setWBMode(ctx, OP_AUTO);
-            }
-            else {
-                rk_aiq_uapi2_setWBMode(ctx, OP_MANUAL);
-            }
+            awb_gainCtrl_t attr;
+            ret = rk_aiq_user_api2_awb_GetWbGainCtrlAttrib(ctx, &attr);
+            attr.opMode = mod->module_ctl[i].opMode;
+            attr.byPass = mod->module_ctl[i].bypass;
+            ret = rk_aiq_user_api2_awb_SetWbGainCtrlAttrib(ctx, &attr);
         }
 #ifdef RKAIQ_HAVE_AF
         else if (cur_type == RESULT_TYPE_AF_PARAM) {
@@ -1648,8 +1663,12 @@ rk_aiq_uapi2_sysctl_setMulCamConc(const rk_aiq_sys_ctx_t* ctx, bool cc)
 {
     ENTER_XCORE_FUNCTION();
     RKAIQ_API_SMART_LOCK(ctx);
+#ifndef ISP_HW_V33
     AiqManager_setMulCamConc(ctx->_rkAiqManager, cc);
     LOGK("cid[%d] %s: cc:%d", ctx->_camPhyId, __func__, cc);
+#else
+    LOGK("cid[%d] %s: ignore !", ctx->_camPhyId, __func__, cc);
+#endif
     EXIT_XCORE_FUNCTION();
 }
 
@@ -1939,41 +1958,41 @@ static void _set_fast_aewb_as_init(const rk_aiq_sys_ctx_t* ctx, rk_aiq_working_m
     info.is_fastboot = false;
     ret = _get_fast_aewb_from_drv(ctx->_sensor_entity_name, &fastAeAwbInfo);
     if (ret == XCAM_RETURN_NO_ERROR) {
-        // set initial wb
-        rk_aiq_uapiV2_awb_ffwbgain_attr_t attr;
+        // // set initial wb
+        // rk_aiq_uapiV2_awb_ffwbgain_attr_t attr;
 
-        attr.sync.sync_mode = RK_AIQ_UAPI_MODE_DEFAULT;
-        attr.sync.done = false;
+        // attr.sync.sync_mode = RK_AIQ_UAPI_MODE_DEFAULT;
+        // attr.sync.done = false;
 
-        // TODO: check last expmode(Linear/Hdr),use hdr_mode in head
+        // // TODO: check last expmode(Linear/Hdr),use hdr_mode in head
 
-        if (mode == RK_AIQ_WORKING_MODE_NORMAL) {
-            float minGain = (8 << 8);
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b;
-            attr.wggain.rgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r / minGain;
-            attr.wggain.grgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr / minGain;
-            attr.wggain.gbgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb / minGain;
-            attr.wggain.bgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b / minGain;
-        }
-        else {
-            float minGain = (8 << 8);
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b;
-            minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue;
-            attr.wggain.rgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red / minGain;
-            attr.wggain.grgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r / minGain;
-            attr.wggain.gbgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b / minGain;
-            attr.wggain.bgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue / minGain;
-        }
+        // if (mode == RK_AIQ_WORKING_MODE_NORMAL) {
+        //     float minGain = (8 << 8);
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b;
+        //     attr.wggain.rgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_r / minGain;
+        //     attr.wggain.grgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gr / minGain;
+        //     attr.wggain.gbgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_gb / minGain;
+        //     attr.wggain.bgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.awb1_gain_b / minGain;
+        // }
+        // else {
+        //     float minGain = (8 << 8);
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b;
+        //     minGain = (minGain < fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue) ? minGain : fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue;
+        //     attr.wggain.rgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_red / minGain;
+        //     attr.wggain.grgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_r / minGain;
+        //     attr.wggain.gbgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_green_b / minGain;
+        //     attr.wggain.bgain = (float)fastAeAwbInfo.cfg.others.awb_gain_cfg.gain0_blue / minGain;
+        // }
 
-        rk_aiq_user_api2_awb_SetFFWbgainAttrib(ctx, attr);
+        // rk_aiq_user_api2_awb_SetFFWbgainAttrib(ctx, attr);
 
-        LOGK("cid[%d] %s: ffwb:%f,%f,%f,%f", ctx->_camPhyId, __func__,
-            attr.wggain.rgain, attr.wggain.grgain, attr.wggain.gbgain, attr.wggain.bgain);
+        // LOGK("cid[%d] %s: ffwb:%f,%f,%f,%f", ctx->_camPhyId, __func__,
+        //     attr.wggain.rgain, attr.wggain.grgain, attr.wggain.gbgain, attr.wggain.bgain);
 
 #ifndef USE_NEWSTRUCT
         // set initial exposure
@@ -2090,9 +2109,15 @@ XCamReturn rk_aiq_uapi2_sysctl_resume(rk_aiq_sys_ctx_t* sys_ctx)
     return AiqManager_setVicapStreamMode(sys_ctx->_rkAiqManager, 1, false);
 }
 
+#if defined(ISP_HW_V33)
+XCamReturn
+rk_aiq_user_api2_postisp_GetAttrib(const rk_aiq_sys_ctx_t* sys_ctx, postisp_api_attrib_t* attr);
+#endif
+
 XCamReturn
 rk_aiq_uapi2_sysctl_getAinrParams(const rk_aiq_sys_ctx_t* sys_ctx, rk_ainr_param* para)
 {
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
     if (!sys_ctx) {
         LOGE("%s: sys_ctx is invalied\n", __func__);
@@ -2103,25 +2128,6 @@ rk_aiq_uapi2_sysctl_getAinrParams(const rk_aiq_sys_ctx_t* sys_ctx, rk_ainr_param
     rk_aiq_working_mode_t mode;
     float dynamicAiBypass = 0;
 
-#ifndef USE_NEWSTRUCT
-    Uapi_ExpQueryInfo_t pExpResInfo;
-    rk_aiq_user_api2_ae_queryExpResInfo(sys_ctx, &pExpResInfo);
-    rk_aiq_uapi2_sysctl_getWorkingMode(sys_ctx, &mode);
-
-    if (mode == RK_AIQ_WORKING_MODE_NORMAL) {
-        para->gain = pExpResInfo.LinAeInfo.LinearExp.analog_gain *
-                     pExpResInfo.LinAeInfo.LinearExp.isp_dgain;
-        para->RawMeanluma = pExpResInfo.LinAeInfo.MeanLuma;
-    } else if (mode == RK_AIQ_WORKING_MODE_ISP_HDR2) {
-        para->gain = pExpResInfo.HdrAeInfo.HdrExp[0].analog_gain *
-                     pExpResInfo.HdrAeInfo.HdrExp[0].isp_dgain;
-        para->RawMeanluma = pExpResInfo.HdrAeInfo.Frm0Luma;
-    } else {
-        para->gain = pExpResInfo.HdrAeInfo.HdrExp[1].analog_gain *
-                     pExpResInfo.HdrAeInfo.HdrExp[1].isp_dgain;
-        para->RawMeanluma = pExpResInfo.HdrAeInfo.Frm1Luma;
-    }
-#else
     ae_api_queryInfo_t queryInfo;
     rk_aiq_user_api2_ae_queryExpResInfo(sys_ctx, &queryInfo);
     rk_aiq_uapi2_sysctl_getWorkingMode(sys_ctx, &mode);
@@ -2136,76 +2142,66 @@ rk_aiq_uapi2_sysctl_getAinrParams(const rk_aiq_sys_ctx_t* sys_ctx, rk_ainr_param
         para->gain = queryInfo.hdrExpInfo.expParam[1].analog_gain * queryInfo.hdrExpInfo.expParam[1].isp_dgain;
         para->RawMeanluma = queryInfo.hdrExpInfo.frm1Luma;
     }
-#endif
 
-    CamCalibDbV2Context_t* aiqCalib;
-    aiqCalib = AiqManager_getCurrentCalibDBV2(sys_ctx->_rkAiqManager);
-    CalibDbV2_PostIspV1_t *ainr = (CalibDbV2_PostIspV1_t*)(CALIBDBV2_GET_MODULE_PTR((void*)aiqCalib, ainr_v1));
+#if defined(ISP_HW_V33)
+    postisp_api_attrib_t postisp_attrib = {0};
+    ret = rk_aiq_user_api2_postisp_GetAttrib(sys_ctx, &postisp_attrib);
+    if (ret != XCAM_RETURN_NO_ERROR)
+        return ret;
 
-    if (!ainr) {
-        LOGE("%s: could not get ainr calib \n", __func__);
-        return XCAM_RETURN_ERROR_FAILED;
-    }
+    postisp_param_auto_t *paut = &postisp_attrib.stAuto;
+    postisp_params_static_t *psta = &paut->sta;
+    postisp_params_dyn_t *pdyn = paut->dyn;
 
-    para->gain_tab_len = ainr->TuningPara.gain_tab_len;
-    para->gain_max = ainr->TuningPara.gain_max;
-    para->tuning_visual_flag = ainr->TuningPara.tuning_visual_flag;
+    para->mode = psta->data.mode;
+    para->gain_tab_len = psta->data.gain_tab_len;
+    para->gain_max = psta->data.gain_max;
+    para->tuning_visual_flag = psta->data.tuning_visual_flag;
 
     for (int i = 0; i < RK_AINR_LUMA_LEN; i++) {
-        para->luma_curve_tab[i] = ainr->TuningPara.luma_point[i];
+        para->luma_curve_tab[i] = psta->data.luma_point[i];
     }
 
-    for (int i = 0; i < ainr->TuningPara.Tuning_ISO_len; i++) {
-        para->gain_tab[i] = ainr->TuningPara.Tuning_ISO[i].gain;
-        para->sigma_tab[i] = ainr->TuningPara.Tuning_ISO[i].sigma;
-        para->shade_tab[i] = ainr->TuningPara.Tuning_ISO[i].shade;
-        para->sharp_tab[i] = ainr->TuningPara.Tuning_ISO[i].sharp;
-        para->min_luma_tab[i] = ainr->TuningPara.Tuning_ISO[i].min_luma;
-        para->sat_scale_tab[i] = ainr->TuningPara.Tuning_ISO[i].sat_scale;
-        para->dark_contrast_tab[i] = ainr->TuningPara.Tuning_ISO[i].dark_contrast;
-        para->ai_ratio_tab[i] = ainr->TuningPara.Tuning_ISO[i].ai_ratio;
-        para->mot_thresh_tab[i] = ainr->TuningPara.Tuning_ISO[i].mot_thresh;
-        para->static_thresh_tab[i] = ainr->TuningPara.Tuning_ISO[i].static_thresh;
-        para->mot_nr_stren_tab [i] = ainr->TuningPara.Tuning_ISO[i].mot_nr_stren;
+    for (int i = 0; i < 13; i++) {
+        para->gain_tab[i] = (float)(1 << i);
+        para->sigma_tab[i] = pdyn[i].data.sigma;
+        para->shade_tab[i] = pdyn[i].data.shade;
+        para->sharp_tab[i] = pdyn[i].data.sharp;
+        para->min_luma_tab[i] = pdyn[i].data.min_luma;
+        para->sat_scale_tab[i] = pdyn[i].data.sat_scale;
+        para->dark_contrast_tab[i] = pdyn[i].data.dark_contrast;
+        para->ai_ratio_tab[i] = pdyn[i].data.ai_ratio;
+        para->mot_thresh_tab[i] = pdyn[i].data.mot_thresh;
+        para->static_thresh_tab[i] = pdyn[i].data.static_thresh;
+        para->mot_nr_stren_tab [i] = pdyn[i].data.mot_nr_stren;
         for (int j = 0; j < RK_AINR_LUMA_LEN; j++) {
-            para->sigma_curve_tab[j][i] = ainr->TuningPara.Tuning_ISO[i].luma_sigma[j];
+            para->sigma_curve_tab[j][i] = pdyn[i].data.luma_sigma[j];
         }
     }
 
-    LOGD("getAinrParams test for ainr params set: en=%d tuning_visual_flag: %d"
-             "gain_tab_len:%d, gain_max:%d cur_gain:%f raw mean:%f, yuv mean:%f \n",
-              para->enable, para->tuning_visual_flag, para->gain_tab_len,
-              para->gain_max, para->gain, para->RawMeanluma, para->YuvMeanluma);
-
-    for (int i =0; i < ainr->TuningPara.Tuning_ISO_len; i++) {
-        LOGD("gain_tab[%d]: %f, sigam[%d]: %f, shade[%d]: %f, sharp[%d]: %f, min_luma[%d]:%f, sat_scale[%d]:%f"
-             ", dark_contrast[%d]:%f, ai_ratio[%d]:%f, mot_thresh[%d]: %f, static_thresh[%d]: %f, mot_nr_stren[%d]: %f \n",
-                i, para->gain_tab[i], i, para->sigma_tab[i], i, para->shade_tab[i], i, para->sharp_tab[i], i, para->min_luma_tab[i],
-                i, para->sat_scale_tab[i], i, para->dark_contrast_tab[i], i, para->ai_ratio_tab[i], i, para->mot_thresh_tab[i],
-                i, para->static_thresh_tab[i], i, para->mot_nr_stren_tab [i]);
-    }
-
-    if (para->gain > ainr->TuningPara.dynamicSw[1])
-        dynamicAiBypass =  ainr->TuningPara.dynamicSw[0];
-    else if (para->gain <  ainr->TuningPara.dynamicSw[0])
-        dynamicAiBypass =  ainr->TuningPara.dynamicSw[1];
+    if (para->gain > psta->data.dynamicSw[1])
+        dynamicAiBypass =  psta->data.dynamicSw[0];
+    else if (para->gain <  psta->data.dynamicSw[0])
+        dynamicAiBypass =  psta->data.dynamicSw[1];
     else if (sys_ctx->_rkAiqManager->ainr_status)
-        dynamicAiBypass =  ainr->TuningPara.dynamicSw[0];
+        dynamicAiBypass =  psta->data.dynamicSw[0];
     else
-        dynamicAiBypass =  ainr->TuningPara.dynamicSw[1];
-
-    LOGD("ainr bypass switch %f", dynamicAiBypass);
+        dynamicAiBypass =  psta->data.dynamicSw[1];
 
     if (para->gain > dynamicAiBypass){
         para->enable = true;
-        LOGD("AINR on\n");
+        //printf("AINR on\n");
     } else if (para->gain < dynamicAiBypass){
         para->enable = false;
-        LOGD("AINR off\n");
+        //printf("AINR off\n");
     }
 
-    para->enable &= ainr->TuningPara.enable;
+    //printf("getAinrParams test for ainr params set: gain_tab [%f %f %f]\n",
+    //        para->gain_tab[0], para->gain_tab[1], para->gain_tab[2]);
+
+    para->enable &= postisp_attrib.en;
     sys_ctx->_rkAiqManager->ainr_status = para->enable;
+#endif
 
     return XCAM_RETURN_NO_ERROR;
 }
@@ -2241,7 +2237,7 @@ static XCamReturn rk_aiq_aiisp_defaut_cb(rk_aiq_aiisp_t* aiisp_evt, void* ctx) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
     rk_aiq_sys_ctx_t* aiisp_ctx= (rk_aiq_sys_ctx_t *)ctx;
     aiisp_ctx->_wr_linecnt_now += aiisp_evt->height;
-    if (aiisp_ctx->_wr_linecnt_now >= aiisp_ctx->_camHw->aiisp_param->rawHgt * 3/4) {
+    if (aiisp_ctx->_wr_linecnt_now >= aiisp_ctx->_camHw->aiisp_param->rawHgt) {
         aiisp_ctx->_wr_linecnt_now = 0;
         aiisp_ctx->_camHw->aiisp_processing(aiisp_ctx->_camHw, aiisp_evt);
         ret = rk_aiq_uapi2_sysctl_ReadAiisp(aiisp_ctx);
@@ -2267,7 +2263,7 @@ XCamReturn rk_aiq_uapi2_sysctl_initAiisp(rk_aiq_sys_ctx_t* sys_ctx, rk_aiq_aiisp
         aiisp_cfg_tmp.rd_mode = 0;
         // set 3/4 frame as whole frame to decrease frame delay, may cause frame
         // corruption
-        aiisp_cfg_tmp.wr_linecnt = height * 3 / 4;
+        aiisp_cfg_tmp.wr_linecnt = height - 1 ;
         aiisp_cfg_tmp.rd_linecnt = 0;
 #else // half frame mode, not support now
         aiisp_cfg_tmp.wr_mode = 1;
@@ -2337,23 +2333,57 @@ XCamReturn
 rk_aiq_uapi2_sysctl_get3AStatsBlk(const rk_aiq_sys_ctx_t* ctx,
                               rk_aiq_isp_stats_t **stats, int timeout_ms)
 {
-	LOGE("Deprecated func !");
-	return XCAM_RETURN_ERROR_FAILED;
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    rk_aiq_isp_stats_t* pstats = (rk_aiq_isp_stats_t*)aiq_mallocz(sizeof(rk_aiq_isp_stats_t));
+    rk_aiq_isp_statistics_t sStats;
+    if (pstats)
+        ret = AiqCore_get3AStats(ctx->_analyzer, &sStats, timeout_ms);
+
+    if (ret == XCAM_RETURN_ERROR_TIMEOUT) {
+        aiq_free(pstats);
+    } else {
+        *stats = pstats;
+        pstats->frame_id = sStats.frame_id;
+        pstats->aec_stats_v25 = sStats.aec_stats;
+        pstats->bValid_aec_stats = sStats.bValid_aec_stats;
+        pstats->awb_stats_v39 = sStats.awb_stats;
+        pstats->bValid_awb_stats = sStats.bValid_awb_stats;
+#if RKAIQ_HAVE_AF_V33 || RKAIQ_ONLY_AF_STATS_V33
+        pstats->afStats_stats = sStats.afStats_stats;
+        pstats->bValid_af_stats = sStats.bValid_af_stats;
+#endif
+    }
+
+	return ret;
 }
 
 XCamReturn
 rk_aiq_uapi2_sysctl_get3AStats(const rk_aiq_sys_ctx_t* ctx,
                               rk_aiq_isp_stats_t *stats)
 {
-	LOGE("Deprecated func !");
-	return XCAM_RETURN_ERROR_FAILED;
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+    rk_aiq_isp_statistics_t sStats;
+    ret = AiqCore_get3AStats(ctx->_analyzer, &sStats, 0);
+    if (ret == XCAM_RETURN_NO_ERROR) {
+        stats->frame_id = sStats.frame_id;
+        stats->aec_stats_v25 = sStats.aec_stats;
+        stats->bValid_aec_stats = sStats.bValid_aec_stats;
+        stats->awb_stats_v39 = sStats.awb_stats;
+        stats->bValid_awb_stats = sStats.bValid_awb_stats;
+#if RKAIQ_HAVE_AF_V33 || RKAIQ_ONLY_AF_STATS_V33
+        stats->afStats_stats = sStats.afStats_stats;
+        stats->bValid_af_stats = sStats.bValid_af_stats;
+#endif
+    }
+
+	return ret;
 }
 
 void
 rk_aiq_uapi2_sysctl_release3AStatsRef(const rk_aiq_sys_ctx_t* ctx,
                                      rk_aiq_isp_stats_t *stats)
 {
-	LOGE("Deprecated func !");
+    aiq_free(stats);
 }
 
 void rk_aiq_uapi2_get_aiqversion_info(const rk_aiq_sys_ctx_t* ctx, rk_aiq_version_info_t* vers)
@@ -2486,11 +2516,14 @@ rk_aiq_uapi2_sysctl_setSnsSyncMode(const rk_aiq_sys_ctx_t* ctx, enum rkmodule_sy
 #include "rk_aiq_user_api2_dehaze.c"
 #include "rk_aiq_user_api2_yme.c"
 #include "rk_aiq_user_api2_af.c"
+#include "rk_aiq_user_api2_ldc.c"
 #endif
 #if defined(ISP_HW_V33)
 #include "rk_aiq_user_api2_enh.c"
 #include "rk_aiq_user_api2_hsv.c"
 #include "rk_aiq_user_api2_texEst.c"
+#include "rk_aiq_user_api2_ldc.c"
+#include "rk_aiq_user_api2_postisp.c"
 #endif
 #include "rk_aiq_user_api2_aeMeas.c"
 #include "rk_aiq_user_api2_blc.c"
@@ -2518,6 +2551,7 @@ rk_aiq_uapi2_sysctl_setSnsSyncMode(const rk_aiq_sys_ctx_t* ctx, enum rkmodule_sy
 #include "rk_aiq_user_api2_ae.c"
 #include "rk_aiq_user_api2_awb_v3.c"
 #include "rk_aiq_user_api2_imgproc.c"
+#include "rk_aiq_user_api2_stats.c"
 #include "rk_aiq_user_api2_camgroup.c"
 #include "../uAPI2/rk_aiq_user_ae_thread_v25_itf.c"
 #include "../uAPI2/rk_aiq_user_api2_custom2_awb.c"

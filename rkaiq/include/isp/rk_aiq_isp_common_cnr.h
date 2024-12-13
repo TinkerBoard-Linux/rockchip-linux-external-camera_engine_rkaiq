@@ -70,7 +70,7 @@ typedef struct cnr_sigmaCurve_s {
         M4_TYPE(u16),
         M4_UI_PARAM(data_x),
         M4_SIZE_EX(1,8),
-        M4_RANGE_EX(0,4095),
+        M4_RANGE_EX(0,1024),
         M4_DEFAULT([0, 64, 128, 256, 384, 640, 896, 1024]),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -85,6 +85,7 @@ typedef struct cnr_sigmaCurve_s {
        M4_SIZE_EX(1,8),
        M4_RANGE_EX(0,1.0),
        M4_DEFAULT([0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03]),
+       M4_DIGIT_EX(3),
        M4_HIDE_EX(0),
        M4_RO(0),
        M4_ORDER(1),
@@ -163,7 +164,7 @@ typedef struct cnr_loNr_preProc_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 0.5),
         M4_DEFAULT(0.333),
-        M4_DIGIT_EX(2f8b),
+        M4_DIGIT_EX(3f8b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -226,7 +227,7 @@ typedef struct cnr_loNr_bifilt_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 1.0),
         M4_DEFAULT(0.0039),
-        M4_DIGIT_EX(2f14b),
+        M4_DIGIT_EX(3f14b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -241,7 +242,7 @@ typedef struct cnr_loNr_bifilt_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 1.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f10b),
+        M4_DIGIT_EX(3f10b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -272,7 +273,7 @@ typedef struct cnr_loNr_iirFilt_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 1.0),
         M4_DEFAULT(0.0078),
-        M4_DIGIT_EX(2f8b),
+        M4_DIGIT_EX(3f8b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -282,24 +283,12 @@ typedef struct cnr_loNr_iirFilt_s {
     // reg: hw_cnrT_loFlt_vsigma, hw_cnrT_expX_shiftBit
     float sw_cnrT_rgeSgm_val;
     /* M4_GENERIC_DESC(
-        M4_ALIAS(sw_cnrT_rgeSgmRatio_mode),
-        M4_TYPE(enum),
-        M4_ENUM_DEF(cnr_iirSgmRatio_mode_t),
-        M4_DEFAULT(cnr_glbSgmRatio_only_mode),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(TODO.\n
-        Reference enum types.\n
-        Freq of use: low))  */
-    cnr_iirSgmRatio_mode_t sw_cnrT_rgeSgmRatio_mode;
-    /* M4_GENERIC_DESC(
         M4_ALIAS(hw_cnrT_loFltGlobalSgm_ratio),
         M4_TYPE(f32),
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 4.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f4b),
+        M4_DIGIT_EX(3f4b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -308,26 +297,12 @@ typedef struct cnr_loNr_iirFilt_s {
     // reg: hw_cnrT_loFltGlobalSgm_ratio
     float hw_cnrT_glbSgm_ratio;
     /* M4_GENERIC_DESC(
-        M4_ALIAS(hw_cnrT_loFltGlobalSgmRatio_alpha),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0.0, 1.0),
-        M4_DEFAULT(0.5),
-        M4_DIGIT_EX(3f3b),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(TODO.\n
-        Freq of use: low))  */
-    // reg: hw_cnrT_loFltGlobalSgmRatio_alpha
-    float hw_cnrT_glbSgmRatio_alpha;
-    /* M4_GENERIC_DESC(
         M4_ALIAS(hw_cnrT_loFltWgt_slope),
         M4_TYPE(f32),
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 8.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f7b),
+        M4_DIGIT_EX(3f7b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -353,7 +328,7 @@ typedef struct cnr_loNr_iirFilt_s {
         M4_ALIAS(hw_cnrT_loFltWgt_maxLimit),
         M4_TYPE(f32),
         M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0.0, 15.0),
+        M4_RANGE_EX(0.0, 16.0),
         M4_DEFAULT(1.0),
         M4_DIGIT_EX(1f3b),
         M4_HIDE_EX(0),
@@ -435,7 +410,7 @@ typedef struct cnr_hiNr_bifilt_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 8.0),
         M4_DEFAULT(3.0),
-        M4_DIGIT_EX(2f4b),
+        M4_DIGIT_EX(3f4b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -444,7 +419,7 @@ typedef struct cnr_hiNr_bifilt_s {
     // @reg: hw_cnrT_hiFiltUV_gain
     float hw_cnrT_uvEdg_strg;
     /* M4_GENERIC_DESC(
-          M4_ALIAS(hw_cnrT_hiFltWgt0_mode),
+        M4_ALIAS(hw_cnrT_hiFltWgt0_mode),
         M4_TYPE(enum),
         M4_ENUM_DEF(cnr_hiFiltWgtZero_mode_t),
         M4_DEFAULT(cnr_wgtIsZero_orgOut_mode),
@@ -461,7 +436,7 @@ typedef struct cnr_hiNr_bifilt_s {
         M4_SIZE_EX(1,13),
         M4_RANGE_EX(0.0, 4.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f6b),
+        M4_DIGIT_EX(3f6b),
         M4_HIDE_EX(0),
         M4_UI_MODULE(curve),
         M4_DATAX([1, 2, 4, 8, 16, 24, 32, 48, 64, 128, 256, 512, 1024]),
@@ -475,9 +450,9 @@ typedef struct cnr_hiNr_bifilt_s {
         M4_ALIAS(hw_cnrT_gainAdjHiFltCur_wgt),
         M4_TYPE(f32),
         M4_SIZE_EX(1,13),
-        M4_RANGE_EX(0.0, 1.0),
+        M4_RANGE_EX(0.0, 2.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f6b),
+        M4_DIGIT_EX(3f6b),
         M4_HIDE_EX(0),
         M4_UI_MODULE(curve),
         M4_DATAX([1, 2, 4, 8, 16, 24, 32, 48, 64, 128, 256, 512, 1024]),
@@ -535,7 +510,7 @@ typedef struct cnr_hiNr_bifilt_s {
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(0.0, 1.0),
         M4_DEFAULT(1.0),
-        M4_DIGIT_EX(2f6b),
+        M4_DIGIT_EX(3f6b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),

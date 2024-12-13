@@ -190,8 +190,6 @@ __RKAIQUAPI_CALLER(gic_api_attrib_t);
 __RKAIQUAPI_CALLER(gic_status_t);
 __RKAIQUAPI_CALLER(cac_api_attrib_t);
 __RKAIQUAPI_CALLER(cac_status_t);
-__RKAIQUAPI_CALLER(ldch_api_attrib_t);
-__RKAIQUAPI_CALLER(ldch_status_t);
 __RKAIQUAPI_CALLER(csm_api_attrib_t);
 __RKAIQUAPI_CALLER(csm_status_t);
 __RKAIQUAPI_CALLER(mge_api_attrib_t);
@@ -254,11 +252,13 @@ __rkaiq_uapi_common_call(void *desc, void *sys_ctx, cJSON *cmd_js, cJSON **ret_j
 		}
 		ret = RkCam_cJSONUtils_ApplyPatches(old_json, cmd_js);
 		if (0 != ret) {
+            RkCam_cJSON_Delete(old_json);
 			XCAM_LOG_ERROR("%s apply patch failed %d!", __func__, ret);
 			return -1;
 		}
 		memset(real_obj, 0, sizeof(real_obj));
 		ret = j2s_json_to_struct(&ctx, old_json, type_name, real_obj);
+        RkCam_cJSON_Delete(old_json);
 		j2s_deinit(&ctx);
 		if (ret) return -1;
 		if (!uapi_desc->arg_set) return -1;
@@ -492,10 +492,6 @@ RkAiqUapiDesc_t rkaiq_uapidesc_list[] = {
     __RKAIQUAPI_DESC_DEF("/uapi/0/gic_uapi/info", gic_status_t, NULL, rk_aiq_user_api2_gic_QueryStatus),
     __RKAIQUAPI_DESC_DEF("/uapi/0/cac_uapi/attr", cac_api_attrib_t, rk_aiq_user_api2_cac_SetAttrib, rk_aiq_user_api2_cac_GetAttrib),
     __RKAIQUAPI_DESC_DEF("/uapi/0/cac_uapi/info", cac_status_t, NULL, rk_aiq_user_api2_cac_QueryStatus),
-#if RKAIQ_HAVE_LDCH_V21
-    __RKAIQUAPI_DESC_DEF("/uapi/0/ldch_uapi/attr", ldch_api_attrib_t, rk_aiq_user_api2_ldch_SetAttrib, rk_aiq_user_api2_ldch_GetAttrib),
-    __RKAIQUAPI_DESC_DEF("/uapi/0/ldch_uapi/info", ldch_status_t, NULL, rk_aiq_user_api2_ldch_QueryStatus),
-#endif
     __RKAIQUAPI_DESC_DEF("/uapi/0/csm_uapi/attr", csm_api_attrib_t, rk_aiq_user_api2_csm_SetAttrib, rk_aiq_user_api2_csm_GetAttrib),
     __RKAIQUAPI_DESC_DEF("/uapi/0/csm_uapi/info", csm_status_t, NULL, rk_aiq_user_api2_csm_QueryStatus),
     __RKAIQUAPI_DESC_DEF("/uapi/0/mge_uapi/attr", mge_api_attrib_t, rk_aiq_user_api2_merge_SetAttrib, rk_aiq_user_api2_merge_GetAttrib),

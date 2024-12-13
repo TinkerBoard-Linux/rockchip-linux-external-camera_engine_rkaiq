@@ -18,6 +18,9 @@
 #include "hwi_c/aiq_CamHwBase.h"
 
 #include <stdio.h>
+#if RKAIQ_HAVE_DUMPSYS
+#include <time.h>
+#endif
 
 #include "common/linux/rk-video-format.h"
 #ifdef ANDROID_OS
@@ -53,6 +56,18 @@
 #include "include/iq_parser_v2/RkAiqCalibDbV2Helper.h"
 #include "xcore/base/xcam_defs.h"
 #include "xcore_c/aiq_v4l2_device.h"
+#include <dlfcn.h>
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
+
+#if RKAIQ_HAVE_DUMPSYS
+#include "aiq_CamHwBaseInfo.h"
+#include "dumpcam_server/info/include/rk_info_utils.h"
+#include "dumpcam_server/info/include/st_string.h"
+#include "dumpcam_server/third-party/argparse/argparse.h"
+#include "info/aiq_hwiIspModsInfo.h"
+#include "info/aiq_ispActiveParamsInfo.h"
+#endif
 
 XCAM_BEGIN_DECLARE
 
@@ -102,6 +117,11 @@ static XCamReturn AiqCamHw_read_aiisp_result(AiqCamHwBase_t* pCamHw);
 static XCamReturn AiqCamHw_get_aiisp_bay3dbuf(AiqCamHwBase_t* pCamHw);
 static XCamReturn AiqCamHw_aiisp_processing(AiqCamHwBase_t* pCamHw, rk_aiq_aiisp_t* aiisp_evt);
 static XCamReturn SetLastAeExpToRttShared(AiqCamHwBase_t* pCamHw);
+
+// dumpsys
+static void AiqCamHwBase_initNotifier(AiqCamHwBase_t* pCamHw);
+static int AiqCamHw_dump(void* pCamHw, st_string* result, int argc, void* argv[]);
+static int __dump(void* dumper, st_string* result, int argc, void* argv[]);
 
 #ifdef ISP_HW_V30
 #define CAMHWISP_EFFECT_ISP_POOL_NUM 12
@@ -196,6 +216,10 @@ static XCamReturn _get_sensor_caps(rk_sensor_full_info_t* sensor_info) {
             frameSize.height   = fie.height;
             frameSize.fps      = fie.interval.denominator / fie.interval.numerator;
             frameSize.hdr_mode = fie.reserved[0];
+            if (sensor_info->frame_size_cnt == SUPPORT_FMT_MAX) {
+               LOGW_CAMHW ("fmts num over %d, ignore !", SUPPORT_FMT_MAX);
+               break;
+            }
             sensor_info->frame_size[sensor_info->frame_size_cnt++] = frameSize;
             fie.index++;
         }
@@ -328,6 +352,8 @@ static rk_aiq_isp_t* _get_isp_subdevs(struct media_device* device, const char* d
                 isp_info[index].phy_id = isp_idx;
             }
         }
+
+        strcpy(isp_info[index].driver, device->info.driver);
     }
 
     if (model_idx == -1) {
@@ -347,6 +373,8 @@ static rk_aiq_isp_t* _get_isp_subdevs(struct media_device* device, const char* d
         isp_info[index].model_idx = 3;
     else
         isp_info[index].model_idx               = -1;
+
+    strcpy(isp_info[index].driver, device->info.driver);
 #endif
 
     strncpy(isp_info[index].media_dev_path, devpath, sizeof(isp_info[index].media_dev_path));
@@ -388,6 +416,13 @@ static rk_aiq_isp_t* _get_isp_subdevs(struct media_device* device, const char* d
         entity_name = media_entity_get_devname(entity);
         if (entity_name) {
             strncpy(isp_info[index].self_path, entity_name, sizeof(isp_info[index].self_path));
+        }
+    }
+    entity = media_get_entity_by_name(device, "rkisp_ldcpath", strlen("rkisp_ldcpath"));
+    if (entity) {
+        entity_name = media_entity_get_devname(entity);
+        if (entity_name) {
+            strncpy(isp_info[index].ldc_path, entity_name, sizeof(isp_info[index].ldc_path));
         }
     }
     entity = media_get_entity_by_name(device, "rkisp_rawwr0", strlen("rkisp_rawwr0"));
@@ -1392,7 +1427,8 @@ const char* AiqCamHw_getBindedSnsEntNmByVd(const char* vd) {
                 stream_vd = true;
         } else {
             if (strstr(s_full_info->isp_info->main_path, vd) ||
-                strstr(s_full_info->isp_info->self_path, vd))
+                strstr(s_full_info->isp_info->self_path, vd) ||
+                strstr(s_full_info->isp_info->ldc_path, vd))
                 stream_vd = true;
         }
 
@@ -1436,13 +1472,84 @@ const char* AiqCamHw_getBindedSnsEntNmByVd(const char* vd) {
 
 static XCamReturn _poll_buffer_ready(void* ctx, AiqHwEvt_t* evt, int dev_index) {
     if (evt->type == ISP_POLL_3A_STATS) {
-		AiqCamHwBase_t* pCamHw = (AiqCamHwBase_t*)ctx;
+        AiqCamHwBase_t* pCamHw = (AiqCamHwBase_t*)ctx;
         void* stats = (void*)AiqV4l2Buffer_getExpbufUsrptr((AiqV4l2Buffer_t*)evt->vb);
+
+#if RKAIQ_HAVE_DUMPSYS
+        // dump stats info
+        {
+            struct timespec time;
+            clock_gettime(CLOCK_MONOTONIC, &time);
+
+            pCamHw->stats.frameloss += evt->frame_id ? evt->frame_id - pCamHw->stats.id - 1 : 0;
+            pCamHw->stats.id        = evt->frame_id;
+            pCamHw->stats.interval  = evt->mTimestamp - pCamHw->stats.timestamp;
+            pCamHw->stats.timestamp = evt->mTimestamp;
+            pCamHw->stats.delay     = XCAM_TIMESPEC_2_USEC(time) - evt->mTimestamp;
+        }
+#endif
 
         btnr_cvt_info_t *btnr_info = &pCamHw->_mIspParamsCvt->mBtnrInfo;
         bayertnr_save_stats(stats, btnr_info);
-	} else if (evt->type == ISP_POLL_PARAMS) {
+
+#if ISP_HW_V33
+    blc_cvt_info_t* blc_info = &pCamHw->_mIspParamsCvt->mBlcInfo;
+    bool btnr_en = pCamHw->_mIspParamsCvt->mCommonCvtInfo.btnr_en;
+    if (!blc_info->ds_address && btnr_en) {
+        rkisp_bay3dbuf_info_t bay3dbuf;
+        memset(&bay3dbuf, 0, sizeof(bay3dbuf));
+        int res =
+            AiqV4l2SubDevice_ioctl((AiqV4l2Device_t*)pCamHw->mIspCoreDev, RKISP_CMD_GET_BAY3D_BUFFD, &bay3dbuf);
+        if (res) {
+            LOGE_CAMHW_SUBM(ISP20HW_SUBM, "get bay3dbuf failed! %d", res);
+            return XCAM_RETURN_ERROR_IOCTL;
+        }
+
+        void* ds_address =
+            (char*)mmap(NULL, bay3dbuf.u.v33.ds_size, PROT_READ | PROT_WRITE, MAP_SHARED, bay3dbuf.u.v33.ds_fd, 0);
+        if (MAP_FAILED == ds_address) {
+            LOGE_CAMHW_SUBM(ISP20HW_SUBM, "ds_fd mmap failed ds_fd is %d ds_size is %d", bay3dbuf.u.v33.ds_fd, bay3dbuf.u.v33.ds_size);
+            return XCAM_RETURN_ERROR_FAILED;
+        }
+        LOGK_CAMHW_SUBM(ISP20HW_SUBM, "blc get bay3dbuf: ds_fd is %d ds_size is %d ds_address is 0x%x",
+            bay3dbuf.u.v33.ds_fd, bay3dbuf.u.v33.ds_size, ds_address);
+        blc_info->ds_fd = bay3dbuf.u.v33.ds_fd;
+        blc_info->gain_fd = bay3dbuf.u.v33.gain_fd;
+        blc_info->iir_fd = bay3dbuf.iir_fd;
+        blc_info->ds_size = bay3dbuf.u.v33.ds_size;
+        blc_info->ds_address = ds_address;
+    }
+    if(blc_info->autoblc_count > 0 && (blc_info->autoblc_count - 1) % 8 == 0){
+        if (!blc_info->tnr_ds_buf)
+            blc_info->tnr_ds_buf = aiq_mallocz(blc_info->ds_size);
+        struct dma_buf_sync sync = { 0 };
+        sync.flags = DMA_BUF_SYNC_READ | DMA_BUF_SYNC_START;
+        ioctl(blc_info->ds_fd, DMA_BUF_IOCTL_SYNC, &sync);
+
+        memcpy(blc_info->tnr_ds_buf, blc_info->ds_address, blc_info->ds_size);
+
+        sync.flags = DMA_BUF_SYNC_READ | DMA_BUF_SYNC_END;
+        ioctl(blc_info->ds_fd, DMA_BUF_IOCTL_SYNC, &sync);
+    }
+#endif
+    } else if (evt->type == ISP_POLL_PARAMS) {
         return XCAM_RETURN_NO_ERROR;
+    } else if (evt->type == ISP_POLL_SOF) {
+#if RKAIQ_HAVE_DUMPSYS
+        // dump fs info
+        {
+            AiqCamHwBase_t* pCamHw = (AiqCamHwBase_t*)ctx;
+
+            struct timespec time;
+            clock_gettime(CLOCK_MONOTONIC, &time);
+
+            pCamHw->prev_fs = pCamHw->fs;
+            pCamHw->fs.frameloss += evt->frame_id ? evt->frame_id - pCamHw->fs.id - 1 : 0;
+            pCamHw->fs.id        = evt->frame_id;
+            pCamHw->fs.timestamp = evt->mTimestamp / 1000;
+            pCamHw->fs.delay     = XCAM_TIMESPEC_2_USEC(time) - evt->mTimestamp / 1000;
+        }
+#endif
     }
 
     AiqCamHwBase_t* pCamHw = (AiqCamHwBase_t*)ctx;
@@ -1469,7 +1576,7 @@ XCamReturn AiqCamHwBase_init(AiqCamHwBase_t* pCamHw, const char* sns_ent_name) {
         return XCAM_RETURN_ERROR_SENSOR;
     }
 
-    pCamHw->mAweekId               = 0;
+    pCamHw->mAweekId               = -1;
     pCamHw->use_aiisp              = false;
     pCamHw->aiisp_param            = NULL;
     pCamHw->_skipped_params        = NULL;
@@ -1479,6 +1586,7 @@ XCamReturn AiqCamHwBase_init(AiqCamHwBase_t* pCamHw, const char* sns_ent_name) {
     pCamHw->mIsOnlineByWorkingMode = false;
 	pCamHw->mIsListenStrmEvt       = true;
     pCamHw->_linked_to_serdes      = false;
+    pCamHw->_not_skip_first        = true;
     aiqMutex_init(&pCamHw->_isp_params_cfg_mutex);
     aiqMutex_init(&pCamHw->_mem_mutex);
     aiqMutex_init(&pCamHw->_stop_cond_mutex);
@@ -1506,6 +1614,10 @@ XCamReturn AiqCamHwBase_init(AiqCamHwBase_t* pCamHw, const char* sns_ent_name) {
     pCamHw->_ldch_drv_mem_ctx.ops_ctx  = pCamHw;
     pCamHw->_ldch_drv_mem_ctx.mem_info = (void*)(pCamHw->ldch_mem_info_array);
 
+    pCamHw->_ldcv_drv_mem_ctx.type     = MEM_TYPE_LDCV;
+    pCamHw->_ldcv_drv_mem_ctx.ops_ctx  = pCamHw;
+    pCamHw->_ldcv_drv_mem_ctx.mem_info = (void*)(pCamHw->ldcv_mem_info_array);
+
     pCamHw->_cac_drv_mem_ctx.type     = MEM_TYPE_CAC;
     pCamHw->_cac_drv_mem_ctx.ops_ctx  = pCamHw;
     pCamHw->_cac_drv_mem_ctx.mem_info = (void*)(pCamHw->cac_mem_info_array);
@@ -1514,7 +1626,6 @@ XCamReturn AiqCamHwBase_init(AiqCamHwBase_t* pCamHw, const char* sns_ent_name) {
     pCamHw->_dbg_drv_mem_ctx.ops_ctx  = pCamHw;
     pCamHw->_dbg_drv_mem_ctx.mem_info = (void*)(pCamHw->dbg_mem_info_array);
     pCamHw->_isp_stream_status        = ISP_STREAM_STATUS_INVALID;
-    pCamHw->mRawStreamInfo.mode       = RK_ISP_RKRAWSTREAM_MODE_INVALID;
 
     {
         // init pool
@@ -1793,6 +1904,12 @@ XCamReturn AiqCamHwBase_init(AiqCamHwBase_t* pCamHw, const char* sns_ent_name) {
     pCamHw->mPollCb.poll_buffer_ready = _poll_buffer_ready;
     pCamHw->mPollCb.poll_event_ready  = NULL;
 
+    // dumpsys
+#if RKAIQ_HAVE_DUMPSYS
+    pCamHw->dump = AiqCamHw_dump;
+    AiqCamHwBase_initNotifier(pCamHw);
+#endif
+
     pCamHw->_state = CAM_HW_STATE_INITED;
     EXIT_CAMHW_FUNCTION();
     return XCAM_RETURN_NO_ERROR;
@@ -1807,6 +1924,21 @@ void AiqCamHwBase_deinit(AiqCamHwBase_t* pCamHw) {
         AiqSofEvtStream_deinit(pCamHw->mIspSofStream);
         aiq_free(pCamHw->mIspSofStream);
         pCamHw->mIspSofStream = NULL;
+    }
+
+    if (pCamHw->use_aiisp) {
+        if (pCamHw->mIspAiispStream) {
+            AiqAiIspStream_deinit(pCamHw->mIspAiispStream);
+            aiq_free(pCamHw->mIspAiispStream);
+            pCamHw->mIspAiispStream = NULL;
+        }
+        pCamHw->lib_aiisp_.Deinit(&pCamHw->lib_aiisp_);
+        struct AiispOps* ops = AiqAiIsp_GetOps(&pCamHw->lib_aiisp_);
+        ops->aiisp_deinit(pCamHw->aiisp_param);
+        if (pCamHw->aiisp_param) {
+            aiq_free(pCamHw->aiisp_param);
+            pCamHw->aiisp_param = NULL;
+        }
     }
 
     if (pCamHw->mIspStremEvtTh) {
@@ -1885,6 +2017,11 @@ void AiqCamHwBase_deinit(AiqCamHwBase_t* pCamHw) {
         aiq_free(pCamHw->mIspStatsDev);
         pCamHw->mIspStatsDev = NULL;
     }
+    if (pCamHw->_mIspParamsCvt) {
+        AiqIspParamsCvt_deinit(pCamHw->_mIspParamsCvt);
+        aiq_free(pCamHw->_mIspParamsCvt);
+        pCamHw->_mIspParamsCvt = NULL;
+    }
     if (pCamHw->mIspCoreDev) {
         AiqV4l2SubDevice_deinit(pCamHw->mIspCoreDev);
         aiq_free(pCamHw->mIspCoreDev);
@@ -1894,11 +2031,6 @@ void AiqCamHwBase_deinit(AiqCamHwBase_t* pCamHw) {
         AiqV4l2SubDevice_deinit(pCamHw->mVicapItfDev);
         aiq_free(pCamHw->mVicapItfDev);
         pCamHw->mVicapItfDev = NULL;
-    }
-    if (pCamHw->_mIspParamsCvt) {
-        AiqIspParamsCvt_deinit(pCamHw->_mIspParamsCvt);
-        aiq_free(pCamHw->_mIspParamsCvt);
-        pCamHw->_mIspParamsCvt = NULL;
     }
     if (pCamHw->_mSensorDev) {
         AiqSensorHw_deinit(pCamHw->_mSensorDev);
@@ -1912,14 +2044,6 @@ void AiqCamHwBase_deinit(AiqCamHwBase_t* pCamHw) {
     if (pCamHw->mEffectIspParamsPool) {
         aiqPool_deinit(pCamHw->mEffectIspParamsPool);
         pCamHw->mEffectIspParamsPool = NULL;
-    }
-    if (pCamHw->use_aiisp) {
-        struct AiispOps* ops = AiqAiIsp_GetOps(&pCamHw->lib_aiisp_);
-        ops->aiisp_deinit(pCamHw->aiisp_param);
-        if (pCamHw->aiisp_param) {
-            aiq_free(pCamHw->aiisp_param);
-            pCamHw->aiisp_param = NULL;
-        }
     }
 
     aiqMutex_deInit(&pCamHw->_stop_cond_mutex);
@@ -2682,6 +2806,8 @@ void AiqCamHw_setCalib(AiqCamHwBase_t* pCamHw, const CamCalibDbV2Context_t* cali
 
     // update infos to sensor hw
     _setExpDelayInfo(pCamHw, pCamHw->_hdr_mode);
+
+    AiqIspParamsCvt_setCalib(pCamHw->_mIspParamsCvt, pCamHw->mCalibDbV2);
 }
 
 static XCamReturn _setupHdrLink_vidcap(AiqCamHwBase_t* pCamHw, int hdr_mode, int cif_index,
@@ -2737,12 +2863,15 @@ XCamReturn AiqCamHw_prepare(AiqCamHwBase_t* pCamHw, uint32_t width, uint32_t hei
         pCamHw->mNoReadBack = false;
     }
 
+#if 0 // have no this restriction from isp39
     // multimplex mode should be using readback mode
     if (s_info->isp_info->isMultiplex) pCamHw->mNoReadBack = false;
-
+#endif
     if (pCamHw->mTbInfo.is_fastboot) {
         pCamHw->mNoReadBack = true;
     }
+
+    if (pCamHw->use_aiisp) pCamHw->mNoReadBack = false;
 
     LOGI_CAMHW_SUBM(ISP20HW_SUBM, "isp hw working mode: %s !",
                     pCamHw->mNoReadBack ? "online" : "readback");
@@ -3007,6 +3136,13 @@ XCamReturn AiqCamHw_prepare(AiqCamHwBase_t* pCamHw, uint32_t width, uint32_t hei
         AiqCifSclStream_prepare(pCamHw->mCifScaleStream);
     }
 
+#if RKAIQ_HAVE_DUMPSYS
+    if (pCamHw->mNoReadBack) {
+        aiq_notifier_remove_subscriber(&pCamHw->notifier, AIQ_NOTIFIER_MATCH_HWI_STREAM_CAP);
+        aiq_notifier_remove_subscriber(&pCamHw->notifier, AIQ_NOTIFIER_MATCH_HWI_STREAM_PROC);
+    }
+#endif
+
     pCamHw->_state = CAM_HW_STATE_PREPARED;
     EXIT_CAMHW_FUNCTION();
     return ret;
@@ -3268,6 +3404,10 @@ XCamReturn AiqCamHw_stop(AiqCamHwBase_t* pCamHw) {
         }
     }
 
+    if (pCamHw->_mIspParamsCvt) {
+        AiqAutoblc_deinit(pCamHw->_mIspParamsCvt);
+    }
+
     pCamHw->_state = CAM_HW_STATE_STOPPED;
     return ret;
 }
@@ -3359,6 +3499,14 @@ XCamReturn AiqCamHw_getSensorModeData(AiqCamHwBase_t* pCamHw, const char* sns_en
     if (ret) {
         LOGE_CAMHW_SUBM(ISP20HW_SUBM, "getSensorModeData failed \n");
         return ret;
+    }
+
+    if (pCamHw->mTbInfo.is_fastboot) {
+        if (pCamHw->mTbInfo.is_start_again) {
+            sns_des->pixel_clock_freq_mhz = pCamHw->mTbInfo.pixel_clock_freq_mhz;
+        } else {
+            pCamHw->mTbInfo.pixel_clock_freq_mhz = sns_des->pixel_clock_freq_mhz;
+        }
     }
 
     xcam_mem_clear(select);
@@ -3550,6 +3698,7 @@ static XCamReturn _setFocusParams(AiqCamHwBase_t* pCamHw, rk_aiq_focus_params_t*
     bool zoom_correction           = p_focus->zoom_correction;
     bool zoomfocus_modifypos       = p_focus->zoomfocus_modifypos;
     bool end_zoom_chg              = p_focus->end_zoom_chg;
+    bool IsNeedCkRebackAtStart     = p_focus->IsNeedCkRebackAtStart;
     bool vcm_config_valid          = p_focus->vcm_config_valid;
     rk_aiq_lens_vcmcfg lens_cfg;
 
@@ -3566,7 +3715,7 @@ static XCamReturn _setFocusParams(AiqCamHwBase_t* pCamHw, rk_aiq_focus_params_t*
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "set focus result failed to device");
             return XCAM_RETURN_ERROR_IOCTL;
         }
-    } else if ((focus_valid && zoom_valid) || end_zoom_chg) {
+    } else if ((focus_valid && zoom_valid) || end_zoom_chg || IsNeedCkRebackAtStart) {
         LOGD_CAMHW_SUBM(ISP20HW_SUBM, "|||setZoomFocusParams");
         if (AiqLensHw_setZoomFocusParams(mLensSubdev, focus_params) < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "set setZoomFocusParams failed to device");
@@ -3866,15 +4015,21 @@ XCamReturn AiqCamHw_setSensorFlip(AiqCamHwBase_t* pCamHw, bool mirror, bool flip
     XCamReturn ret               = XCAM_RETURN_NO_ERROR;
 
     int32_t skip_frame_sequence = 0;
+    if (!pCamHw->use_rkrawstream) {
+        if (pCamHw->_state == CAM_HW_STATE_STARTED) {
+            AiqRawStreamCapUnit_stop_vicap_stream_only(pCamHw->mRawCapUnit);
+        }
+    }
     ret = mSensorSubdev->set_mirror_flip(mSensorSubdev, mirror, flip, &skip_frame_sequence);
+    if (!pCamHw->use_rkrawstream) {
+        if (pCamHw->_state == CAM_HW_STATE_STARTED) {
+            AiqRawStreamCapUnit_skip_frame_and_restart_vicap_stream(pCamHw->mRawCapUnit, skip_frm_cnt);
+        }
+    }
     /* struct timespec tp; */
     /* clock_gettime(CLOCK_MONOTONIC, &tp); */
     /* int64_t skip_ts = (int64_t)(tp.tv_sec) * 1000 * 1000 * 1000 + (int64_t)(tp.tv_nsec); */
-    if (!pCamHw->use_rkrawstream) {
-        if (pCamHw->_state == CAM_HW_STATE_STARTED && skip_frame_sequence != -1) {
-            AiqRawStreamCapUnit_skip_frames(pCamHw->mRawCapUnit, skip_frm_cnt, skip_frame_sequence);
-        }
-    }
+
     return ret;
 }
 
@@ -3944,45 +4099,51 @@ static void _allocMemResource(uint8_t id, void* ops_ctx, void* config, void** me
     rk_aiq_share_mem_config_t* share_mem_cfg = (rk_aiq_share_mem_config_t*)config;
 
     aiqMutex_lock(&isp20->_mem_mutex);
-    if (share_mem_cfg->mem_type == MEM_TYPE_LDCH) {
+    if (share_mem_cfg->mem_type == MEM_TYPE_LDCH || share_mem_cfg->mem_type == MEM_TYPE_LDCV) {
         rk_aiq_ldch_share_mem_info_t* mem_info_array = NULL;
         int i                                        = 0;
 #if defined(ISP_HW_V20) || defined(ISP_HW_V21)
-        struct rkisp_ldchbuf_size ldchbuf_size;
-        struct rkisp_ldchbuf_info ldchbuf_info;
-        unsigned long cmd = RKISP_CMD_SET_LDCHBUF_SIZE;
+        struct rkisp_meshbuf_size meshbuf_size;
+        struct rkisp_meshbuf_info meshbuf_info;
+        unsigned long cmd = RKISP_CMD_SET_meshbuf_size;
 
-        ldchbuf_size.meas_width  = share_mem_cfg->alloc_param.width;
-        ldchbuf_size.meas_height = share_mem_cfg->alloc_param.height;
+        meshbuf_size.meas_width  = share_mem_cfg->alloc_param.width;
+        meshbuf_size.meas_height = share_mem_cfg->alloc_param.height;
 #else
-        struct rkisp_meshbuf_info ldchbuf_info;
-        struct rkisp_meshbuf_size ldchbuf_size;
+        struct rkisp_meshbuf_info meshbuf_info;
+        struct rkisp_meshbuf_size meshbuf_size;
         unsigned long cmd = RKISP_CMD_SET_MESHBUF_SIZE;
 
-        ldchbuf_size.unite_isp_id = id;
-        ldchbuf_size.module_id    = ISP3X_MODULE_LDCH;
-        ldchbuf_size.meas_width   = share_mem_cfg->alloc_param.width;
-        ldchbuf_size.meas_height  = share_mem_cfg->alloc_param.height;
-        ldchbuf_size.buf_cnt      = ISP2X_MESH_BUF_NUM;
+        meshbuf_size.unite_isp_id = id;
+        if (share_mem_cfg->mem_type == MEM_TYPE_LDCH)
+            meshbuf_size.module_id = ISP3X_MODULE_LDCH;
+        else
+            meshbuf_size.module_id = ISP39_MODULE_LDCV;
+        meshbuf_size.meas_width   = share_mem_cfg->alloc_param.width;
+        meshbuf_size.meas_height  = share_mem_cfg->alloc_param.height;
+        meshbuf_size.buf_cnt      = ISP2X_MESH_BUF_NUM;
 #endif
         ret = isp20->mIspCoreDev->_v4l_base.io_control(&isp20->mIspCoreDev->_v4l_base, cmd,
-                                                       &ldchbuf_size);
+                                                       &meshbuf_size);
         if (ret < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "alloc ldch buf failed!");
             *mem_ctx = NULL;
             aiqMutex_unlock(&isp20->_mem_mutex);
             return;
         }
-        xcam_mem_clear(ldchbuf_info);
+        xcam_mem_clear(meshbuf_info);
 #if defined(ISP_HW_V20) || defined(ISP_HW_V21)
-        cmd = RKISP_CMD_GET_LDCHBUF_INFO;
+        cmd = RKISP_CMD_GET_meshbuf_info;
 #else
-        ldchbuf_info.unite_isp_id = id;
-        ldchbuf_info.module_id    = ISP3X_MODULE_LDCH;
+        meshbuf_info.unite_isp_id = id;
+        if (share_mem_cfg->mem_type == MEM_TYPE_LDCH)
+            meshbuf_info.module_id = ISP3X_MODULE_LDCH;
+        else
+            meshbuf_info.module_id = ISP39_MODULE_LDCV;
         cmd                       = RKISP_CMD_GET_MESHBUF_INFO;
 #endif
         ret = isp20->mIspCoreDev->_v4l_base.io_control(&isp20->mIspCoreDev->_v4l_base, cmd,
-                                                       &ldchbuf_info);
+                                                       &meshbuf_info);
         if (ret < 0) {
             LOGE_CAMHW_SUBM(ISP20HW_SUBM, "failed to get ldch buf info!!");
             *mem_ctx = NULL;
@@ -3990,24 +4151,34 @@ static void _allocMemResource(uint8_t id, void* ops_ctx, void* config, void** me
             return;
         }
 
-        mem_info_array = (rk_aiq_ldch_share_mem_info_t*)(isp20->_ldch_drv_mem_ctx.mem_info);
+        if (share_mem_cfg->mem_type == MEM_TYPE_LDCH)
+            mem_info_array = (rk_aiq_lut_share_mem_info_t*)(isp20->_ldch_drv_mem_ctx.mem_info);
+        else
+            mem_info_array = (rk_aiq_lut_share_mem_info_t*)(isp20->_ldcv_drv_mem_ctx.mem_info);
         struct isp2x_mesh_head* head = NULL;
         for (i = 0; i < ISP2X_MESH_BUF_NUM; i++) {
             mem_info_array[offset + i].map_addr =
-                mmap(NULL, ldchbuf_info.buf_size[i], PROT_READ | PROT_WRITE, MAP_SHARED,
-                     ldchbuf_info.buf_fd[i], 0);
+                mmap(NULL, meshbuf_info.buf_size[i], PROT_READ | PROT_WRITE, MAP_SHARED,
+                     meshbuf_info.buf_fd[i], 0);
             if (MAP_FAILED == mem_info_array[offset + i].map_addr)
                 LOGE_CAMHW_SUBM(ISP20HW_SUBM, "failed to map ldch buf!!");
 
-            mem_info_array[offset + i].fd   = ldchbuf_info.buf_fd[i];
-            mem_info_array[offset + i].size = ldchbuf_info.buf_size[i];
+            mem_info_array[offset + i].fd   = meshbuf_info.buf_fd[i];
+            mem_info_array[offset + i].size = meshbuf_info.buf_size[i];
             head = (struct isp2x_mesh_head*)mem_info_array[offset + i].map_addr;
             mem_info_array[offset + i].addr =
                 (void*)((char*)mem_info_array[offset + i].map_addr + head->data_oft);
             mem_info_array[offset + i].state = (char*)&head->stat;
+
+            LOGD_ALDC("Get %s buf : fd %d, size %d from drv",
+                      share_mem_cfg->mem_type == MEM_TYPE_LDCH ? "LDCH" : "LDCV",
+                      meshbuf_info.buf_fd[i], meshbuf_info.buf_size[i]);
         }
 
-        *mem_ctx = (void*)(&isp20->_ldch_drv_mem_ctx);
+        if (share_mem_cfg->mem_type == MEM_TYPE_LDCH)
+            *mem_ctx = (void*)(&isp20->_ldch_drv_mem_ctx);
+        else
+            *mem_ctx = (void*)(&isp20->_ldcv_drv_mem_ctx);
     } else if (share_mem_cfg->mem_type == MEM_TYPE_CAC) {
         rk_aiq_cac_share_mem_info_t* mem_info_array = NULL;
         int i                                       = 0;
@@ -4102,7 +4273,7 @@ static void _allocMemResource(uint8_t id, void* ops_ctx, void* config, void** me
         }
         *mem_ctx = (void*)(&isp20->_dbg_drv_mem_ctx);
     }
-	aiqMutex_unlock(&isp20->_mem_mutex);
+    aiqMutex_unlock(&isp20->_mem_mutex);
 }
 
 static void _releaseMemResource(uint8_t id, void* mem_ctx) {
@@ -4116,7 +4287,7 @@ static void _releaseMemResource(uint8_t id, void* mem_ctx) {
     isp20 = (AiqCamHwBase_t*)(drv_mem_ctx->ops_ctx);
 
     aiqMutex_lock(&isp20->_mem_mutex);
-    if (drv_mem_ctx->type == MEM_TYPE_LDCH) {
+    if (drv_mem_ctx->type == MEM_TYPE_LDCH || drv_mem_ctx->type == MEM_TYPE_LDCV) {
         int i = 0;
         rk_aiq_ldch_share_mem_info_t* mem_info_array =
             (rk_aiq_ldch_share_mem_info_t*)(drv_mem_ctx->mem_info);
@@ -4135,7 +4306,11 @@ static void _releaseMemResource(uint8_t id, void* mem_ctx) {
                 mem_info_array[offset + i].fd = -1;
             }
         }
-        module_id = ISP2X_MODULE_LDCH;
+
+        if (drv_mem_ctx->type == MEM_TYPE_LDCH)
+            module_id = ISP2X_MODULE_LDCH;
+        else
+            module_id = ISP39_MODULE_LDCV;
     } else if (drv_mem_ctx->type == MEM_TYPE_FEC) {
         int i = 0;
         rk_aiq_fec_share_mem_info_t* mem_info_array =
@@ -4226,9 +4401,9 @@ static void* _getFreeItem(uint8_t id, void* mem_ctx) {
     isp20 = (AiqCamHwBase_t*)(drv_mem_ctx->ops_ctx);
 
     aiqMutex_lock(&isp20->_mem_mutex);
-    if (drv_mem_ctx->type == MEM_TYPE_LDCH) {
-        rk_aiq_ldch_share_mem_info_t* mem_info_array =
-            (rk_aiq_ldch_share_mem_info_t*)(drv_mem_ctx->mem_info);
+    if (drv_mem_ctx->type == MEM_TYPE_LDCH || drv_mem_ctx->type == MEM_TYPE_LDCV) {
+        rk_aiq_lut_share_mem_info_t* mem_info_array =
+            (rk_aiq_lut_share_mem_info_t*)(drv_mem_ctx->mem_info);
         do {
             for (idx = 0; idx < ISP2X_MESH_BUF_NUM; idx++) {
                 if (mem_info_array[offset + idx].map_addr) {
@@ -4284,7 +4459,7 @@ static void* _getFreeItem(uint8_t id, void* mem_ctx) {
             }
         } while (retry_cnt--);
     }
-	aiqMutex_unlock(&isp20->_mem_mutex);
+    aiqMutex_unlock(&isp20->_mem_mutex);
     return NULL;
 }
 
@@ -4321,7 +4496,7 @@ XCamReturn AiqCamHw_handleIspRstList(AiqCamHwBase_t* pCamHw, AiqList_t* pList) {
         if (!AiqV4l2Device_isActivated(pCamHw->mIspParamsDev)) {
 
             if (!AiqV4l2Device_isActivated(pCamHw->mIspStatsDev)) {
-                ret = pCamHw->mIspParamsDev->start(pCamHw->mIspStatsDev, false);
+                ret = pCamHw->mIspStatsDev->start(pCamHw->mIspStatsDev, false);
                 if (ret < 0) {
                     LOGE_CAMHW_SUBM(ISP20HW_SUBM, "prepare isp stats dev err: %d\n", ret);
                 }
@@ -4332,6 +4507,42 @@ XCamReturn AiqCamHw_handleIspRstList(AiqCamHwBase_t* pCamHw, AiqList_t* pList) {
                 LOGE_CAMHW_SUBM(ISP20HW_SUBM, "prepare isp params dev err: %d\n", ret);
             }
 
+#if defined(RKAIQ_HAVE_MULTIISP)
+            if (g_mIsMultiIspMode) {
+                // dequeue param buffer to judge whether unite isp is splitted into two sides or not.
+                AiqV4l2Buffer_t* pV4l2Buf    = NULL;
+                int              buf_length  = 0;
+                int              struct_size = 0;
+                pV4l2Buf = AiqV4l2Device_getBuf(pCamHw->mIspParamsDev, -1);
+                if (!pV4l2Buf) {
+                    LOGE_CAMHW_SUBM(ISP20HW_SUBM, "Can not get isp params buffer, queued cnts:%d \n",
+                                    AiqV4l2Device_getQueuedBufCnt(pCamHw->mIspParamsDev));
+                } else {
+                   buf_length = pV4l2Buf->_buf.length;
+                }
+#if defined(ISP_HW_V33)
+                struct_size = sizeof(struct isp33_isp_params_cfg);
+#elif defined(ISP_HW_V39)
+                struct_size = sizeof(struct isp39_isp_params_cfg);
+#elif defined(ISP_HW_V32) || defined(ISP_HW_V32_LITE)
+                struct_size = sizeof(struct isp32_isp_params_cfg);
+#elif defined(ISP_HW_V30)
+                struct_size = sizeof(struct isp3x_isp_params_cfg);
+#elif defined(ISP_HW_V21)
+                struct_size = sizeof(struct isp21_isp_params_cfg);
+#endif
+                if (struct_size && buf_length && (buf_length / struct_size) != 2) {
+                    LOGE_CAMHW("isp param buf length %d, isp param struct size %d", buf_length, struct_size);
+                    LOGE_CAMHW("unite isp size error!!!!! raw size is %s than expect size",
+                                    (buf_length / struct_size) > 2 ? "largger": "smaller");
+                }
+
+                if (pV4l2Buf) {
+                    AiqV4l2Device_returnBufToPool(pCamHw->mIspParamsDev, pV4l2Buf);
+                }
+
+            }
+#endif
             ret = _hdr_mipi_prepare_mode(pCamHw, pCamHw->_hdr_mode);
             if (ret < 0) {
                 LOGE_CAMHW_SUBM(ISP20HW_SUBM, "hdr mipi start err: %d\n", ret);
@@ -4601,6 +4812,11 @@ static XCamReturn _setIspConfig(AiqCamHwBase_t* pCamHw, AiqList_t* result_list) 
             isp_params->module_en_update |= ISP2X_MODULE_LSC;
 
         isp_params->frame_id = frameId;
+        AiqV4l2Buffer_setSequence(pV4l2Buf, frameId);
+
+        // should be before SplitIspParams, restrictions must be applied
+        // to all ISPs
+        AiqCamHw_process_restriction(pCamHw, isp_params);
 
 #if defined(ISP_HW_V30)
         if(pCamHw->IsMultiIspMode == false) {
@@ -4680,14 +4896,32 @@ static XCamReturn _setIspConfig(AiqCamHwBase_t* pCamHw, AiqList_t* result_list) 
                 AiqV4l2Device_returnBufToPool(pCamHw->mIspParamsDev, pV4l2Buf);
                 return XCAM_RETURN_NO_ERROR;
             }
-            if (frameId == 0) is_wait_params_done = true;
+            if (pCamHw->mAweekId == frameId) is_wait_params_done = true;
         }
         if (pCamHw->mAweekId == frameId) {
             isp_params->module_cfg_update |= ISP32_MODULE_RTT_FST;
         }
 
-#if defined(ISP_HW_V39) || defined(ISP_HW_V33)
-        AiqCamHw_process_restriction(pCamHw, isp_params);
+        uint64_t oldEns = pCamHw->_isp_module_ens;
+		// assume the max valid bit is 60
+		for (int i = 0; i < 60; i++) {
+			if (isp_params->module_en_update & (1ULL << i)) {
+				if (isp_params->module_ens & (1ULL << i))
+					pCamHw->_isp_module_ens |= (1ULL << i);
+				else
+					pCamHw->_isp_module_ens &= ~(1ULL << i);
+			}
+		}
+        if (oldEns == pCamHw->_isp_module_ens && pCamHw->_state == CAM_HW_STATE_STARTED)
+			isp_params->module_en_update = 0;
+
+#if defined(RKAIQ_HAVE_MULTIISP)
+        // sync ispparam 0 module_en_update to ispparam 1 module_en_update
+        if (g_mIsMultiIspMode) {
+            if (isp_params->module_en_update != (isp_params + 1)->module_en_update) {
+                (isp_params + 1)->module_en_update = isp_params->module_en_update;
+            }
+        }
 #endif
 
         if (AiqV4l2Device_qbuf(pCamHw->mIspParamsDev, pV4l2Buf, true) != 0) {
@@ -4729,16 +4963,6 @@ static XCamReturn _setIspConfig(AiqCamHwBase_t* pCamHw, AiqList_t* result_list) 
                 AiqV4l2Device_returnBufToPool(pCamHw->mIspParamsDev, dqbuf);
             }
         }
-
-		// assume the max valid bit is 60
-		for (int i = 0; i < 60; i++) {
-			if (isp_params->module_en_update & (1ULL << i)) {
-				if (isp_params->module_ens & (1ULL << i))
-					pCamHw->_isp_module_ens |= (1ULL << i);
-				else
-					pCamHw->_isp_module_ens &= ~(1ULL << i);
-			}
-		}
 
         LOGD_CAMHW_SUBM(
             ISP20HW_SUBM,
@@ -5243,7 +5467,12 @@ XCamReturn AiqCamHw_setHwResListener(AiqCamHwBase_t* pCamHw, AiqHwResListener_t*
     return XCAM_RETURN_NO_ERROR;
 }
 
-void AiqCamHw_setTbInfo(AiqCamHwBase_t* pCamHw, rk_aiq_tb_info_t* info) { pCamHw->mTbInfo = *info; }
+void AiqCamHw_setTbInfo(AiqCamHwBase_t* pCamHw, rk_aiq_tb_info_t* info) {
+    pCamHw->mTbInfo = *info;
+    if (pCamHw->mTbInfo.is_fastboot && pCamHw->getLastEffectParamTb) {
+        pCamHw->getLastEffectParamTb(pCamHw);
+    }
+}
 
 XCamReturn AiqCamHw_rawReProc_prepare(AiqCamHwBase_t* pCamHw, uint32_t sequence,
                                       rk_aiq_frame_info_t* offline_finfo) {
@@ -5271,7 +5500,7 @@ void AiqCamHw_setDevBufCnt(AiqCamHwBase_t* pCamHw, AiqDevBufCnt_t* devBufCntsInf
 }
 
 void AiqCamHw_setRawStreamInfo(AiqCamHwBase_t* pCamHw, rk_aiq_rkrawstream_info_t* info) {
-    if (pCamHw) return;
+    if (!pCamHw) return;
 
     pCamHw->mRawStreamInfo = *info;
 }
@@ -5516,33 +5745,96 @@ static XCamReturn AiqCamHw_process_restriction(AiqCamHwBase_t* pCamHw, void* isp
     }
 #endif
 
+//global gain constraint
+    bool old_en_drc = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_DRC);
+    bool old_en_mge = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_HDRMGE);
+    bool old_en_btnr = !!(pCamHw->_isp_module_ens & ISP3X_MODULE_BAY3D);
+    bool old_en_lsc = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_LSC);
+#ifdef ISP_HW_V39
+    bool old_en_dehaze = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_DHAZ);
+    bool old_en_yuvme = !!(pCamHw->_isp_module_ens & ISP39_MODULE_YUVME);
+#endif
+
+    bool new_en_drc =
+            !!(isp_params->module_en_update & ISP2X_MODULE_DRC) ? !!(isp_params->module_ens & ISP2X_MODULE_DRC) : old_en_drc;
+    bool new_en_mge =
+            !!(isp_params->module_en_update & ISP2X_MODULE_HDRMGE) ? !!(isp_params->module_ens & ISP2X_MODULE_HDRMGE) : old_en_mge;
+    bool new_en_btnr =
+            !!(isp_params->module_en_update & ISP3X_MODULE_BAY3D) ? !!(isp_params->module_ens & ISP3X_MODULE_BAY3D) : old_en_btnr;
+    bool new_en_lsc =
+            !!(isp_params->module_en_update & ISP2X_MODULE_LSC) ? !!(isp_params->module_ens & ISP2X_MODULE_LSC) : old_en_lsc;
+#ifdef ISP_HW_V39
+    bool new_en_dehaze =
+            !!(isp_params->module_en_update & ISP2X_MODULE_DHAZ) ? !!(isp_params->module_ens & ISP2X_MODULE_DHAZ) : old_en_dehaze;
+    bool new_en_yuvme =
+            !!(isp_params->module_en_update & ISP39_MODULE_YUVME) ? !!(isp_params->module_ens & ISP39_MODULE_YUVME) : old_en_yuvme;
+#endif
+    bool gain_en = true;
+    if(isp_params->module_cfg_update & ISP2X_MODULE_CNR)
+        pCamHw->exgain_status.exgain_bypass = isp_params->others.cnr_cfg.exgain_bypass;
+    if(isp_params->module_cfg_update & ISP2X_MODULE_SHARP)
+        pCamHw->exgain_status.local_gain_bypass = isp_params->others.sharp_cfg.local_gain_bypass;
+#if ISP_HW_V33
+    if(isp_params->module_cfg_update & ISP2X_MODULE_GIC)
+        pCamHw->exgain_status.gain_bypass_en = isp_params->others.gic_cfg.gain_bypass_en;
+    if (!new_en_drc && !new_en_mge && !new_en_btnr && !new_en_lsc) {
+#elif ISP_HW_V39
+    if (!new_en_drc && !new_en_mge && !new_en_btnr && !new_en_lsc && !new_en_dehaze && !new_en_yuvme) {
+#endif
+        gain_en = false;
+        isp_params->module_ens &= ~ISP3X_MODULE_GAIN;
+        isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+        isp_params->others.cnr_cfg.exgain_bypass = 1;
+        isp_params->others.sharp_cfg.local_gain_bypass = 1;
+#if ISP_HW_V33
+        isp_params->others.gic_cfg.gain_bypass_en = 1;
+#endif
+        LOGD_CAMHW_SUBM(ISP20HW_SUBM, "When global gain related module turn off, autoly turn off gain and turn on exgain_bypass");
+    }
+    else {
+        if (pCamHw->exgain_status.gain_module_en) {
+            isp_params->module_ens |= ISP3X_MODULE_GAIN;
+            isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+        }
+        isp_params->others.cnr_cfg.exgain_bypass = pCamHw->exgain_status.exgain_bypass;
+        isp_params->others.sharp_cfg.local_gain_bypass = pCamHw->exgain_status.local_gain_bypass;
+#if ISP_HW_V33
+        isp_params->others.gic_cfg.gain_bypass_en = pCamHw->exgain_status.gain_bypass_en;
+#endif
+    }
+
+
+//ynr cnr sharp enh gain constraint
 #if ISP_HW_V39
     int state = AiqManager_getAiqState(pCamHw->rkAiqManager);
     if (state != AIQ_STATE_INITED && state != AIQ_STATE_STOPED) {
-        uint64_t mask = (ISP2X_MODULE_YNR | ISP2X_MODULE_CNR | ISP2X_MODULE_SHARP);
-        uint64_t ens_up = isp_params->module_en_update & mask;
-
-        if (ens_up) {
-			bool old_en_ynr = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_YNR);
-			bool old_en_cnr = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_CNR);
-            bool old_en_sharp = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_SHARP);
-
-			bool new_en_ynr =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_YNR) ? !!(isp_params->module_ens & ISP2X_MODULE_YNR) : old_en_ynr;
-			bool new_en_cnr =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_CNR) ? !!(isp_params->module_ens & ISP2X_MODULE_CNR) : old_en_cnr;
-			bool new_en_sharp =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_SHARP) ? !!(isp_params->module_ens & ISP2X_MODULE_SHARP) : old_en_sharp;
+        bool update_ynr = isp_params->module_en_update & ISP2X_MODULE_YNR;
+        bool update_cnr = isp_params->module_en_update & ISP2X_MODULE_CNR;
+        bool update_sharp = isp_params->module_en_update & ISP2X_MODULE_SHARP;
+        if(!(update_ynr && update_cnr && update_sharp)){
+            isp_params->module_ens &= ~ISP3X_MODULE_CNR;
+            isp_params->module_ens &= ~ISP3X_MODULE_SHARP;
+            isp_params->module_ens &= ~ISP3X_MODULE_YNR;
+            isp_params->module_en_update &= ~ISP3X_MODULE_CNR;
+            isp_params->module_en_update &= ~ISP3X_MODULE_SHARP;
+            isp_params->module_en_update &= ~ISP3X_MODULE_YNR;
+            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "ynr, cnr and sharp'en should be update together!");
+        }else {
+			bool new_en_ynr = isp_params->module_ens & ISP2X_MODULE_YNR;
+			bool new_en_cnr = isp_params->module_ens & ISP2X_MODULE_CNR;
+			bool new_en_sharp = isp_params->module_ens & ISP2X_MODULE_SHARP;
 
 			// check if all true or all false
-			if (new_en_ynr && new_en_cnr && new_en_sharp) {
+			if (new_en_ynr && new_en_cnr && new_en_sharp && gain_en) {
                 isp_params->module_ens |= ISP3X_MODULE_GAIN;
                 isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+                pCamHw->exgain_status.gain_module_en = true;
                 return XCAM_RETURN_NO_ERROR;
             }
             if (!new_en_ynr && !new_en_cnr && !new_en_sharp) {
                 isp_params->module_ens &= ~ISP3X_MODULE_GAIN;
                 isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+                pCamHw->exgain_status.gain_module_en = false;
                 return XCAM_RETURN_NO_ERROR;
             }
 
@@ -5556,44 +5848,44 @@ static XCamReturn AiqCamHw_process_restriction(AiqCamHwBase_t* pCamHw, void* isp
 #elif ISP_HW_V33
     int state = AiqManager_getAiqState(pCamHw->rkAiqManager);
     if (state != AIQ_STATE_INITED && state != AIQ_STATE_STOPED) {
-        uint64_t mask = (ISP2X_MODULE_YNR | ISP2X_MODULE_CNR | ISP2X_MODULE_SHARP | ISP33_MODULE_ENH);
-        uint64_t ens_up = isp_params->module_en_update & mask;
+        bool update_ynr = isp_params->module_en_update & ISP2X_MODULE_YNR;
+        bool update_cnr = isp_params->module_en_update & ISP2X_MODULE_CNR;
+        bool update_sharp = isp_params->module_en_update & ISP2X_MODULE_SHARP;
+        bool update_enh = isp_params->module_en_update & ISP33_MODULE_ENH;
 
-        if (ens_up) {
-			bool old_en_ynr = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_YNR);
-			bool old_en_cnr = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_CNR);
-            bool old_en_sharp = !!(pCamHw->_isp_module_ens & ISP2X_MODULE_SHARP);
-            bool old_en_enh = !!(pCamHw->_isp_module_ens & ISP33_MODULE_ENH);
-
-			bool new_en_ynr =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_YNR) ? !!(isp_params->module_ens & ISP2X_MODULE_YNR) : old_en_ynr;
-			bool new_en_cnr =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_CNR) ? !!(isp_params->module_ens & ISP2X_MODULE_CNR) : old_en_cnr;
-			bool new_en_sharp =
-				 !!(isp_params->module_en_update & ISP2X_MODULE_SHARP) ? !!(isp_params->module_ens & ISP2X_MODULE_SHARP) : old_en_sharp;
-            bool new_en_enh =
-				 !!(isp_params->module_en_update & ISP33_MODULE_ENH) ? !!(isp_params->module_ens & ISP33_MODULE_ENH) : old_en_enh;
+        if(!(update_ynr && update_cnr && update_sharp && update_enh)){
+            isp_params->module_ens &= ~ISP3X_MODULE_CNR;
+            isp_params->module_ens &= ~ISP3X_MODULE_SHARP;
+            isp_params->module_ens &= ~ISP3X_MODULE_YNR;
+            isp_params->module_ens &= ~ISP33_MODULE_ENH;
+            isp_params->module_en_update &= ~ISP3X_MODULE_CNR;
+            isp_params->module_en_update &= ~ISP3X_MODULE_SHARP;
+            isp_params->module_en_update &= ~ISP3X_MODULE_YNR;
+            isp_params->module_en_update &= ~ISP33_MODULE_ENH;
+            LOGD_CAMHW_SUBM(ISP20HW_SUBM, "ynr, cnr and sharp'en should be update together!");
+        }
+        else {
+			bool new_en_ynr = isp_params->module_ens & ISP2X_MODULE_YNR;
+			bool new_en_cnr = isp_params->module_ens & ISP2X_MODULE_CNR;
+			bool new_en_sharp = isp_params->module_ens & ISP2X_MODULE_SHARP;
+            bool new_en_enh = isp_params->module_ens & ISP33_MODULE_ENH;
 
 			// check if all true or all false
-            if (new_en_ynr && new_en_cnr && new_en_sharp && new_en_enh) {
+            if (new_en_ynr && new_en_cnr && new_en_sharp && new_en_enh && gain_en) {
                 isp_params->module_ens |= ISP3X_MODULE_GAIN;
                 isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+                pCamHw->exgain_status.gain_module_en = true;
                 return XCAM_RETURN_NO_ERROR;
             }
             if (!new_en_ynr && !new_en_cnr && !new_en_sharp && !new_en_enh) {
                 isp_params->module_ens &= ~ISP3X_MODULE_GAIN;
                 isp_params->module_en_update |= ISP3X_MODULE_GAIN;
+                pCamHw->exgain_status.gain_module_en = false;
                 return XCAM_RETURN_NO_ERROR;
             }
-
-			LOGW_CAMHW_SUBM(ISP20HW_SUBM, "ynr, cnr and sharp'en can't be turn on/off in running time!"
-				"please use bypass instead");
-			isp_params->module_en_update &= ~ISP3X_MODULE_CNR;
-			isp_params->module_en_update &= ~ISP3X_MODULE_SHARP;
-            isp_params->module_en_update &= ~ISP3X_MODULE_YNR;
-            isp_params->module_en_update &= ~ISP33_MODULE_ENH;
         }
     }
+
 #endif
     return XCAM_RETURN_NO_ERROR;
 }
@@ -5743,6 +6035,8 @@ static XCamReturn SetLastAeExpToRttShared(AiqCamHwBase_t* pCamHw) {
                 (uint32_t)(last_ae->aecExpInfo.HdrExp[2].exp_real_params.isp_dgain * (1 << 16));
         }
 
+        AIQ_REF_BASE_UNREF(&last_ae->_base._ref_base);
+
 #if defined(ISP_HW_V33)
         cmd = RKISP_CMD_SET_TB_HEAD_V33;
 #else
@@ -5760,7 +6054,227 @@ static XCamReturn SetLastAeExpToRttShared(AiqCamHwBase_t* pCamHw) {
                    fastAeAwbInfo.head.exp_isp_dgain[0]);
     }
 
+    if (pCamHw->mTbInfo.is_start_again) {
+        return ret;
+    }
+
+    if (pCamHw->saveInfotoFileTb) {
+        pCamHw->saveInfotoFileTb(pCamHw);
+    }
+
     return ret;
+}
+
+static void AiqCamHwBase_initNotifier(AiqCamHwBase_t* pCamHw) {
+#if RKAIQ_HAVE_DUMPSYS
+    aiq_notifier_init(&pCamHw->notifier);
+
+    {
+        pCamHw->sub_base.match_type     = AIQ_NOTIFIER_MATCH_HWI_BASE;
+        pCamHw->sub_base.name           = "HWI -> base";
+        pCamHw->sub_base.dump.dump_fn_t = __dump;
+        pCamHw->sub_base.dump.dumper    = pCamHw;
+
+        aiq_notifier_add_subscriber(&pCamHw->notifier, &pCamHw->sub_base);
+    }
+
+    {
+        pCamHw->sub_stream_cap.match_type     = AIQ_NOTIFIER_MATCH_HWI_STREAM_CAP;
+        pCamHw->sub_stream_cap.name           = "HWI -> stream_cap";
+        pCamHw->sub_stream_cap.dump.dump_fn_t = AiqRawStreamCapUnit_dump;
+        pCamHw->sub_stream_cap.dump.dumper    = pCamHw->mRawCapUnit;
+
+        aiq_notifier_add_subscriber(&pCamHw->notifier, &pCamHw->sub_stream_cap);
+    }
+
+    {
+        pCamHw->sub_stream_proc.match_type     = AIQ_NOTIFIER_MATCH_HWI_STREAM_PROC;
+        pCamHw->sub_stream_proc.name           = "HWI -> stream_proc";
+        pCamHw->sub_stream_proc.dump.dump_fn_t = AiqRawStreamProcUnit_dump;
+        pCamHw->sub_stream_proc.dump.dumper    = pCamHw->mRawProcUnit;
+
+        aiq_notifier_add_subscriber(&pCamHw->notifier, &pCamHw->sub_stream_proc);
+    }
+
+    {
+        pCamHw->sub_sensor.match_type     = AIQ_NOTIFIER_MATCH_HWI_SENSOR;
+        pCamHw->sub_sensor.name           = "HWI -> sensor";
+        pCamHw->sub_sensor.dump.dump_fn_t = pCamHw->_mSensorDev->dump;
+        pCamHw->sub_sensor.dump.dumper    = pCamHw->_mSensorDev;
+
+        aiq_notifier_add_subscriber(&pCamHw->notifier, &pCamHw->sub_sensor);
+    }
+
+    hwi_isp_mods_add_subscriber(pCamHw);
+#endif
+}
+
+static int __dump(void* dumper, st_string* result, int argc, void* argv[]) {
+    XCamReturn ret = XCAM_RETURN_NO_ERROR;
+
+#if RKAIQ_HAVE_DUMPSYS
+    hwi_base_dump_mod_param((AiqCamHwBase_t*)dumper, result);
+    hwi_base_dump_chn_status((AiqCamHwBase_t*)dumper, result);
+    hwi_base_dump_stats_videobuf_status((AiqCamHwBase_t*)dumper, result);
+    hwi_base_dump_params_videobuf_status((AiqCamHwBase_t*)dumper, result);
+#endif
+
+    return ret;
+}
+
+#if RKAIQ_HAVE_DUMPSYS
+static const char* const usages[] = {
+    "./dumpcam hwi cmd [args]",
+    NULL,
+};
+
+static int _gHelp = 0;
+static int dbg_help_cb(struct argparse* self, const struct argparse_option* option) {
+    _gHelp = 1;
+
+    return 0;
+}
+#endif
+
+static int AiqCamHw_dump(void* pCamHw, st_string* result, int argc, void* argv[]) {
+#if RKAIQ_HAVE_DUMPSYS
+    int dump_args[AIQ_NOTIFIER_MATCH_MAX] = {0};
+
+    if (argc < 2) {
+        dump_args[AIQ_NOTIFIER_MATCH_HWI_ALL] = 1;
+    } else {
+        char buffer[MAX_LINE_LENGTH * 4] = {0};
+        struct argparse_option options[] = {
+            OPT_GROUP("basic options:"),
+            OPT_BOOLEAN('A', "all", &dump_args[AIQ_NOTIFIER_MATCH_HWI_ALL], "dump all info", NULL,
+                        0, 0),
+            OPT_BOOLEAN('b', "base", &dump_args[AIQ_NOTIFIER_MATCH_HWI_BASE], "dump base info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('c', "cap", &dump_args[AIQ_NOTIFIER_MATCH_HWI_STREAM_CAP],
+                        "dump stream capture info", NULL, 0, 0),
+            OPT_BOOLEAN('d', "proc", &dump_args[AIQ_NOTIFIER_MATCH_HWI_STREAM_PROC],
+                        "dump stream proc info", NULL, 0, 0),
+            OPT_BOOLEAN('s', "sensor", &dump_args[AIQ_NOTIFIER_MATCH_HWI_SENSOR],
+                        "dump sensor info ", NULL, 0, 0),
+
+            OPT_GROUP("isp modules options:"),
+            OPT_BOOLEAN('e', "ae", &dump_args[AIQ_NOTIFIER_MATCH_AEC], "dump ae module info", NULL,
+                        0, 0),
+            OPT_BOOLEAN('f', "hist", &dump_args[AIQ_NOTIFIER_MATCH_HIST], "dump hist module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('i', "awb", &dump_args[AIQ_NOTIFIER_MATCH_AWB], "dump awb module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('j', "wbgain", &dump_args[AIQ_NOTIFIER_MATCH_AWB],
+                        "dump awb gain module info ", NULL, 0, 0),
+            OPT_BOOLEAN('k', "af", &dump_args[AIQ_NOTIFIER_MATCH_AF], "dump af module info", NULL,
+                        0, 0),
+            OPT_BOOLEAN('m', "dpc", &dump_args[AIQ_NOTIFIER_MATCH_DPCC], "dump dpcc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('n', "merge", &dump_args[AIQ_NOTIFIER_MATCH_MERGE],
+                        "dump merge module info ", NULL, 0, 0),
+            OPT_BOOLEAN('o', "ccm", &dump_args[AIQ_NOTIFIER_MATCH_CCM], "dump ccm module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('p', "lsc", &dump_args[AIQ_NOTIFIER_MATCH_LSC], "dump lsc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('r', "blc", &dump_args[AIQ_NOTIFIER_MATCH_BLC], "dump blc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('V', "rawnr", &dump_args[AIQ_NOTIFIER_MATCH_RAWNR],
+                        "dump rawnr module info ", NULL, 0, 0),
+            OPT_BOOLEAN('t', "gic", &dump_args[AIQ_NOTIFIER_MATCH_GIC], "dump gic module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('u', "debayer", &dump_args[AIQ_NOTIFIER_MATCH_DEBAYER],
+                        "dump debayer module info ", NULL, 0, 0),
+            OPT_BOOLEAN('v', "lut3d", &dump_args[AIQ_NOTIFIER_MATCH_LUT3D],
+                        "dump lut3d module info ", NULL, 0, 0),
+            OPT_BOOLEAN('w', "dehaz", &dump_args[AIQ_NOTIFIER_MATCH_DEHAZE],
+                        "dump dehaze module info ", NULL, 0, 0),
+            OPT_BOOLEAN('x', "gamma", &dump_args[AIQ_NOTIFIER_MATCH_AGAMMA],
+                        "dump gamma module info ", NULL, 0, 0),
+            OPT_BOOLEAN('y', "degamma", &dump_args[AIQ_NOTIFIER_MATCH_ADEGAMMA],
+                        "dump degamma module info ", NULL, 0, 0),
+            OPT_BOOLEAN('z', "csm", &dump_args[AIQ_NOTIFIER_MATCH_CSM], "dump csm module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('B', "cgc", &dump_args[AIQ_NOTIFIER_MATCH_CGC], "dump cgc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('C', "gain", &dump_args[AIQ_NOTIFIER_MATCH_GAIN], "dump gain module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('D', "cp", &dump_args[AIQ_NOTIFIER_MATCH_CP], "dump cproc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('E', "ie", &dump_args[AIQ_NOTIFIER_MATCH_IE], "dump ie module info", NULL,
+                        0, 0),
+            OPT_BOOLEAN('F', "tnr", &dump_args[AIQ_NOTIFIER_MATCH_TNR], "dump tnr module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('G', "ynr", &dump_args[AIQ_NOTIFIER_MATCH_YNR], "dump ynr module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('H', "cnr", &dump_args[AIQ_NOTIFIER_MATCH_CNR], "dump uvnr module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('I', "sharp", &dump_args[AIQ_NOTIFIER_MATCH_SHARPEN],
+                        "dump sharp module info ", NULL, 0, 0),
+            OPT_BOOLEAN('J', "drc", &dump_args[AIQ_NOTIFIER_MATCH_DRC], "dump drc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('K', "cac", &dump_args[AIQ_NOTIFIER_MATCH_CAC], "dump cac module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('M', "afd", &dump_args[AIQ_NOTIFIER_MATCH_AFD], "dump afd module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('N', "rgbir", &dump_args[AIQ_NOTIFIER_MATCH_RGBIR],
+                        "dump rgbir module info ", NULL, 0, 0),
+            OPT_BOOLEAN('O', "ldc", &dump_args[AIQ_NOTIFIER_MATCH_LDC], "dump ldc module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('P', "aestats", &dump_args[AIQ_NOTIFIER_MATCH_AESTATS],
+                        "dump ae stats module info ", NULL, 0, 0),
+            OPT_BOOLEAN('R', "histeq", &dump_args[AIQ_NOTIFIER_MATCH_HISTEQ],
+                        "dump histeq module info ", NULL, 0, 0),
+            OPT_BOOLEAN('S', "enhaz", &dump_args[AIQ_NOTIFIER_MATCH_ENH],
+                        "dump enhance module info", NULL, 0, 0),
+            OPT_BOOLEAN('T', "texest", &dump_args[AIQ_NOTIFIER_MATCH_TEXEST],
+                        "dump texest module info ", NULL, 0, 0),
+            OPT_BOOLEAN('U', "hsv", &dump_args[AIQ_NOTIFIER_MATCH_HSV], "dump hsv module info",
+                        NULL, 0, 0),
+            OPT_BOOLEAN('\0', "help", NULL, "show this help message and exit", dbg_help_cb, 0,
+                        OPT_NONEG),
+            OPT_END(),
+        };
+
+        char additional_desc[1024 * 3] = {0};
+        snprintf(additional_desc, sizeof(additional_desc),
+                 "\n\nAdditional description of 'dumpcam hwi'.\n\n"
+                 "eg., 'dumpcam hwi -A' or 'dumpcam hwi all'\n"
+                 "  Dump all information.\n\n"
+                 "eg., 'dumpcam hwi -b' or 'dumpcam hwi --base'\n"
+                 "  Dump base information.\n\n"
+                 "eg., 'dumpcam hwi -bs' or 'dumpcam hwi --base --sensor'\n"
+                 "  Dump base and sensor information.\n\n");
+
+        struct argparse argparse;
+        argparse_init(&argparse, options, usages, 0);
+        argparse_describe(&argparse, "\nA brief description of how to dump hwi.", additional_desc);
+
+        argc = argparse_parse(&argparse, argc, (const char**)argv);
+        if (_gHelp || argc < 0) {
+            _gHelp = 0;
+            argparse_usage_string(&argparse, buffer);
+            string_printf(result, buffer);
+        }
+    }
+
+    if (dump_args[AIQ_NOTIFIER_MATCH_HWI_ALL]) {
+        for (int32_t i = AIQ_NOTIFIER_MATCH_HWI_BASE; i < AIQ_NOTIFIER_MATCH_HWI_ALL; i++)
+            aiq_notifier_notify_dumpinfo(&((AiqCamHwBase_t*)pCamHw)->notifier, i, result, argc,
+                                         argv);
+
+        return true;
+    }
+
+    for (int32_t i = 0; i < AIQ_NOTIFIER_MATCH_ALL; i++) {
+        if (dump_args[i])
+            aiq_notifier_notify_dumpinfo(&((AiqCamHwBase_t*)pCamHw)->notifier, i, result, argc,
+                                         argv);
+    }
+
+    return true;
+#else
+    return true;
+#endif
 }
 
 XCAM_END_DECLARE

@@ -200,7 +200,8 @@ XCamReturn RkPollThread_poll_buffer_loop(AiqPollThread_t* pTh) {
             if (pTh->_dev_type)
                 evt.vb->_buf_type       = evt.type;
             AiqRawStream_t* stream = (AiqRawStream_t*)pTh->_stream;
-            AiqV4l2Buffer_setReserved(pBuf, (uint8_t*)(stream->_reserved));
+            if (pTh->_dev_type == VICAP_POLL_SCL)
+                AiqV4l2Buffer_setReserved(pBuf, (uint8_t*)(stream->_reserved));
             AiqV4l2Buffer_ref(pBuf);
             pTh->_poll_callback->poll_buffer_ready(pTh->_poll_callback->_pCtx, &evt,
                                                    ((AiqRawStream_t*)pTh->_stream)->_dev_index);
@@ -512,7 +513,7 @@ XCamReturn AiqStream_init(AiqStream_t* pStream, AiqV4l2Device_t* pDev, int type)
 
 void AiqStream_deinit(AiqStream_t* pStream) {
     if (pStream->_poll_thread) {
-        if (pStream->_dev_type == ISP_POLL_SOF)
+        if (pStream->_dev_type == ISP_POLL_SOF || pStream->_dev_type == ISP_POLL_AIISP)
             AiqEventPollThread_deinit((AiqEventPollThread_t*)(pStream->_poll_thread));
         else
             AiqPollThread_deinit(pStream->_poll_thread);
@@ -585,6 +586,9 @@ static XCamReturn close_aiisp(AiqAiIspStream_t* pStream) {
         LOGE_CAMHW_SUBM(ISP20HW_SUBM, "close aiisp failed! %d", res);
         return XCAM_RETURN_ERROR_IOCTL;
     }
+    close(pStream->bay3dbuf.iir_fd);
+    close(pStream->bay3dbuf.u.v39.aiisp_fd);
+    close(pStream->bay3dbuf.u.v39.gain_fd);
     int mun_ret = munmap(pStream->iir_address, pStream->bay3dbuf.iir_size);
     mun_ret     = munmap(pStream->gain_address, pStream->bay3dbuf.u.v39.gain_size);
     mun_ret     = munmap(pStream->aiisp_address, pStream->bay3dbuf.u.v39.aiisp_size);

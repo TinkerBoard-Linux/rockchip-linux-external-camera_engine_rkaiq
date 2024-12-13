@@ -148,7 +148,7 @@ XCamReturn BtnrSelectParam
         return XCAM_RETURN_ERROR_PARAM;
     }
 
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pBtnrCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
 
     if (ratio > 0.5)
@@ -376,7 +376,7 @@ XCamReturn BtnrSelectParam
         return XCAM_RETURN_ERROR_PARAM;
     }
 
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pBtnrCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
 
     if (ratio > 0.5)
@@ -388,8 +388,56 @@ XCamReturn BtnrSelectParam
     out->mdMeDyn = paut->mdMeDyn[inear];
     out->spNrDyn = paut->spNrDyn[inear];
 
+    out->mdMeDyn.mdSigma.hw_btnrT_sigma_scale = interpolation_f32(
+                paut->mdMeDyn[ilow].mdSigma.hw_btnrT_sigma_scale, paut->mdMeDyn[ihigh].mdSigma.hw_btnrT_sigma_scale, ratio);
+    out->mdMeDyn.mdSigma.hw_btnrT_sigmaHdrS_scale = interpolation_f32(
+                paut->mdMeDyn[ilow].mdSigma.hw_btnrT_sigmaHdrS_scale, paut->mdMeDyn[ihigh].mdSigma.hw_btnrT_sigmaHdrS_scale, ratio);
+    out->spNrDyn.preSpNr.sigma.hw_btnrT_sigma_scale = interpolation_f32(
+                paut->spNrDyn[ilow].preSpNr.sigma.hw_btnrT_sigma_scale, paut->spNrDyn[ihigh].preSpNr.sigma.hw_btnrT_sigma_scale, ratio);
+    out->spNrDyn.preSpNr.sigma.hw_btnrT_sigmaHdrS_scale = interpolation_f32(
+                paut->spNrDyn[ilow].preSpNr.sigma.hw_btnrT_sigmaHdrS_scale, paut->spNrDyn[ihigh].preSpNr.sigma.hw_btnrT_sigmaHdrS_scale, ratio);
+
+    out->spNrDyn.sigmaEnv.sw_btnrT_autoSgmIIR_alpha = interpolation_f32(
+                paut->spNrDyn[ilow].sigmaEnv.sw_btnrT_autoSgmIIR_alpha, paut->spNrDyn[ihigh].sigmaEnv.sw_btnrT_autoSgmIIR_alpha, ratio);
+    out->spNrDyn.sigmaEnv.hw_btnrT_statsPixAlpha_thred = interpolation_f32(
+                paut->spNrDyn[ilow].sigmaEnv.hw_btnrT_statsPixAlpha_thred, paut->spNrDyn[ihigh].sigmaEnv.hw_btnrT_statsPixAlpha_thred, ratio);
+
+    for (i = 0; i < 20; i++) {
+        out->spNrDyn.sigmaEnv.hw_btnrC_mdSigma_curve.val[i] = interpolation_f32(
+                    paut->spNrDyn[ilow].sigmaEnv.hw_btnrC_mdSigma_curve.val[i], paut->spNrDyn[ihigh].sigmaEnv.hw_btnrC_mdSigma_curve.val[i], ratio);
+    }
+    for (i = 0; i < 16; i++) {
+        out->spNrDyn.sigmaEnv.hw_btnrC_preSpNrSgm_curve.val[i] = interpolation_f32(
+                    paut->spNrDyn[ilow].sigmaEnv.hw_btnrC_preSpNrSgm_curve.val[i], paut->spNrDyn[ihigh].sigmaEnv.hw_btnrC_preSpNrSgm_curve.val[i], ratio);
+    }
+
     return XCAM_RETURN_NO_ERROR;
 }
+
+
+XCamReturn BtnrApplyStrength
+(
+    BtnrContext_t *pBtnrCtx,
+    btnr_param_t* out)
+{
+    if(pBtnrCtx == NULL || out == NULL) {
+        LOGE_ANR("%s(%d): null pointer\n", __FUNCTION__, __LINE__);
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    if (pBtnrCtx->strength_en) {
+        float fPercent = algo_strength_to_percent(pBtnrCtx->fStrength);
+
+        btnr_mdMe_dyn_t* pmdMeDyn = &out->mdMeDyn;
+        pmdMeDyn->mdSigma.hw_btnrT_sigma_scale *= fPercent;
+        pmdMeDyn->mdSigma.hw_btnrT_sigmaHdrS_scale *= fPercent;
+
+        LOGI_ANR("BtnrApplyStrength: fStrength %f, fPercent %f\n", pBtnrCtx->fStrength, fPercent);
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
 #endif
 
 static XCamReturn
@@ -433,6 +481,7 @@ prepare(RkAiqAlgoCom* params)
         if (params->u.prepare.conf_type & RK_AIQ_ALGO_CONFTYPE_UPDATECALIB_PTR) {
             pBtnrCtx->btnr_attrib =
                 (btnr_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, bayertnr));
+            pBtnrCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
             return XCAM_RETURN_NO_ERROR;
         }
     }
@@ -440,6 +489,7 @@ prepare(RkAiqAlgoCom* params)
     pBtnrCtx->working_mode = params->u.prepare.working_mode;
     pBtnrCtx->btnr_attrib =
         (btnr_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, bayertnr));
+    pBtnrCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
     pBtnrCtx->isReCal_ = true;
     return result;
 }
@@ -472,13 +522,25 @@ XCamReturn Abtnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpa
         need_recal = true;
     }
 
-    int delta_iso = abs(iso - pBtnrCtx->pre_iso);
-    if(delta_iso > 0.01 || init) {
+    if(init) {
         pBtnrCtx->pre_iso = iso;
-        need_recal = true;
     }
 
-    outparams->cfg_update = true;
+    int delta_iso = abs(iso - pBtnrCtx->pre_iso);
+    if(delta_iso > 0 || init) {
+        need_recal = true;
+        pBtnrCtx->sameISO_cnt = 0;
+    }
+
+    if(delta_iso == 0) {
+        pBtnrCtx->sameISO_cnt++;
+    }
+
+    if(pBtnrCtx->sameISO_cnt == 1) {
+        need_recal = true;
+    }
+    //printf("delta_iso:%d sameISO_cnt:%d need_recal:%d\n", delta_iso, pBtnrCtx->sameISO_cnt, need_recal);
+    outparams->cfg_update = false;
     if (need_recal) {
         btnr_res->sta = pBtnrCtx->btnr_attrib->stAuto.sta;
 #if RKAIQ_HAVE_BAYERTNR_V30
@@ -487,6 +549,7 @@ XCamReturn Abtnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpa
 #endif
 #if RKAIQ_HAVE_BAYERTNR_V41
         BtnrSelectParam(pBtnrCtx, btnr_res, iso);
+        BtnrApplyStrength(pBtnrCtx, btnr_res);
 #endif
         outparams->cfg_update = true;
         outparams->en = btnr_attrib->en;
@@ -499,6 +562,9 @@ XCamReturn Abtnr_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpa
         outparams->bypass = btnr_attrib->bypass;
     }
 
+    if(delta_iso > 0) {
+        pBtnrCtx->pre_iso = iso;
+    }
     return XCAM_RETURN_NO_ERROR;
 }
 

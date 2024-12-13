@@ -82,6 +82,12 @@
 #include "common/rk_aiq_types_v32.h"
 #include "common/rk_aiq_types_v39.h"
 
+#if ISP_HW_V39
+#include "isp/rk_aiq_stats_awb39.h"
+#elif ISP_HW_V33
+#include "isp/rk_aiq_stats_awb33.h"
+#endif
+
 #define ANR_NO_SEPERATE_MARCO (0)
 
 
@@ -479,24 +485,24 @@ typedef struct {
 typedef struct {
     uint32_t frame_id;
     union {
-        rk_aiq_isp_aec_stats_t aec_stats;
-        RKAiqAecStatsV25_t     aec_stats_v25;
+        rk_aiq_isp_aec_stats_t aec_stats; /* rv1106 ... */
+        RKAiqAecStatsV25_t     aec_stats_v25; /* rv1103b rk3576 */
     };
     bool bValid_aec_stats;
     int awb_hw_ver;
     union {
         rk_aiq_awb_stat_res_v200_t awb_stats_v200;
-        rk_aiq_awb_stat_res2_v201_t awb_stats_v21;
-        rk_aiq_isp_awb_stats2_v3x_t awb_stats_v3x;
-        rk_aiq_isp_awb_stats_v32_t awb_stats_v32;
-        awbStats_stats_priv_t awb_stats_v39;
+        rk_aiq_awb_stat_res2_v201_t awb_stats_v21; /* rk356x */
+        rk_aiq_isp_awb_stats2_v3x_t awb_stats_v3x; /* rk3588 */
+        rk_aiq_isp_awb_stats_v32_t awb_stats_v32; /* rv1106, rk3562 */
+        awbStats_stats_priv_t awb_stats_v39; /* rv1103b rk3576 */
     };
     bool bValid_awb_stats;
     int af_hw_ver;
     union {
         rk_aiq_isp_af_stats_t  af_stats;
-        rk_aiq_isp_af_stats_v3x_t af_stats_v3x;
-        afStats_stats_t afStats_stats;
+        rk_aiq_isp_af_stats_v3x_t af_stats_v3x; /* rk3588 */
+        afStats_stats_t afStats_stats; /* rk3576 */
     };
     bool bValid_af_stats;
 } rk_aiq_isp_stats_t;
@@ -691,6 +697,12 @@ typedef struct rkisp_bay3dbuf_info_s {
             int ds_fd;
             int ds_size;
         } v32;
+        struct {
+			int ds_fd;
+			int ds_size;
+			int gain_fd;
+			int gain_size;
+		} v33;
         struct {
             int gain_fd;
             int gain_size;

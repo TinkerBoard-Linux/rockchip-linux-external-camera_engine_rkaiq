@@ -23,6 +23,9 @@
 #include "c_base/aiq_list.h"
 #include "c_base/aiq_mutex.h"
 #include "common/rk_aiq_types_priv_c.h"
+#if RKAIQ_HAVE_DUMPSYS
+#include "dumpcam_server/info/include/st_string.h"
+#endif
 #include "include/xcore/base/xcam_defs.h"
 #include "modules/rk_aiq_isp32_modules.h"
 #if (defined(ISP_HW_V39) || defined(ISP_HW_V33)) && (USE_NEWSTRUCT)
@@ -100,8 +103,6 @@ struct IspParamsCvt_Ops {
                                    const rk_aiq_isp_af_params_t* af_data);
     XCamReturn (*ConvertGaingParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg,
                                      rk_aiq_isp_gain_params_t* gain);
-    XCamReturn (*ConvertAldchgParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg,
-                                      const rk_aiq_isp_ldch_params_t* ldch_cfg);
     XCamReturn (*ConvertGicgParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg,
                                     const rk_aiq_isp_gic_params_t* gic_cfg);
     XCamReturn (*ConvertCacgParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg,
@@ -122,9 +123,16 @@ struct IspParamsCvt_Ops {
     XCamReturn (*CheckIspParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg);
     XCamReturn (*FixedAwbOveflowToIsp3xParams)(AiqIspParamsCvt_t* pCvt, void* isp_cfg,
                                                bool multiIspMode);
+
+    void (*update)(void* src, void* dst);
     void (*Dump)(AiqIspParamsCvt_t* pCvt, uint64_t modules, int fd);
 };
 
+/**
+ * @brief - Convert the params to hardware params for isp modules
+ *
+ * @mCvtedIsp33Prams: the latest converted params.
+ */
 struct AiqIspParamsCvt_s {
     int32_t _CamPhyId;
     uint32_t sensor_output_width;
@@ -149,31 +157,41 @@ struct AiqIspParamsCvt_s {
     struct isp32_bls_cfg mLatestBlsCfg;
     struct isp32_awb_gain_cfg mLatestWbGainCfg;
     rk_aiq_wb_gain_v32_t awb_gain_final;
+    struct isp3x_gain_cfg mLatestGainCfg;
 #elif defined(ISP_HW_V33)
     struct isp33_isp_meas_cfg mLatestMeasCfg;
     struct isp32_bls_cfg mLatestBlsCfg;
     struct isp32_awb_gain_cfg mLatestWbGainCfg;
     rk_aiq_wb_gain_v32_t awb_gain_final;
+    struct isp3x_gain_cfg mLatestGainCfg;
 #endif
 #if defined(ISP_HW_V30) || defined(ISP_HW_V21)
     struct isp21_awb_gain_cfg mLatestWbGainCfg;
 #endif
 #if (defined(ISP_HW_V39) || defined(ISP_HW_V33)) && (USE_NEWSTRUCT)
     btnr_cvt_info_t mBtnrInfo;
+    void *btnr_attrib;
 #endif
     float mLatestIspDgain;
 #if defined(ISP_HW_V39) && (USE_NEWSTRUCT)
     cac_cvt_info_t mCacInfo;
 #endif
     common_cvt_info_t mCommonCvtInfo;
+    blc_cvt_info_t mBlcInfo;
     isp_params_t isp_params;
     AiqIspDrvParams_info_t mLatestCfgArray[ISP2X_ID_MAX];
+
+    union {
+        struct isp33_isp_params_cfg* mCvtedIsp33Prams;
+        struct isp39_isp_params_cfg* mCvtedIsp39Prams;
+    };
 
     struct IspParamsCvt_Ops mIspParamsCvtOps;
 };
 
 XCamReturn AiqIspParamsCvt_init(AiqIspParamsCvt_t* pCvt);
 void AiqIspParamsCvt_deinit(AiqIspParamsCvt_t* pCvt);
+void AiqAutoblc_deinit(AiqIspParamsCvt_t* pCvt);
 XCamReturn AiqIspParamsCvt_merge_isp_results(AiqIspParamsCvt_t* pCvt, AiqList_t* results,
                                              void* isp_cfg, bool is_multi_isp, bool use_aiisp);
 void AiqIspParamsCvt_setCamPhyId(AiqIspParamsCvt_t* pCvt, int phyId);
@@ -187,6 +205,7 @@ void AiqIspParamsCvt_updateIspModuleForceEns(AiqIspParamsCvt_t* pCvt, u64 module
 aiq_params_base_t* AiqIspParamsCvt_get_3a_result(AiqIspParamsCvt_t* pCvt, AiqList_t* results,
                                                  int32_t type);
 void AiqIspParamsCvt_getCommonCvtInfo(AiqIspParamsCvt_t* pCvt, AiqList_t* results, bool use_aiisp);
+void AiqIspParamsCvt_setCalib(AiqIspParamsCvt_t* pCvt, const CamCalibDbV2Context_t* calibv2);
 
 XCAM_END_DECLARE
 #endif

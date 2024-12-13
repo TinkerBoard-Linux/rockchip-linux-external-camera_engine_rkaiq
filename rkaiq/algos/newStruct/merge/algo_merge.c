@@ -318,7 +318,7 @@ XCamReturn MergeSelectParam(MergeContext_t* pMergeCtx, mge_param_t* out, int iso
     float ratio = 0.0f;
 
     if (paut->sta.paraLinkCfg.sw_mgeT_paraLink_mode == amge_isoLink_mode) {
-        pre_interp(iso, paut->sta.paraLinkCfg.sw_mgeT_isoLink_val, MERGE_LINK_NUM, &ilow, &ihigh,
+        pre_interp(iso, (uint32_t *)paut->sta.paraLinkCfg.sw_mgeT_isoLink_val, MERGE_LINK_NUM, &ilow, &ihigh,
                    &ratio);
     } else if (paut->sta.paraLinkCfg.sw_mgeT_paraLink_mode == amge_envLink_mode) {
         pre_interp_movecoef(pMergeCtx->NextCtrlData.MoveCoef,
@@ -379,6 +379,9 @@ XCamReturn MergeSelectParam(MergeContext_t* pMergeCtx, mge_param_t* out, int iso
             interpolation_f32(paut->dyn[ilow].mdWgt_baseHdrS.sw_mgeT_wgtMaxTh_strg,
                               paut->dyn[ihigh].mdWgt_baseHdrS.sw_mgeT_wgtMaxTh_strg, ratio);
     }
+    out->dyn.mdWgt_baseHdrS.sw_mgeT_lumaDiff_scale =
+        interpolation_f32(paut->dyn[ilow].mdWgt_baseHdrS.sw_mgeT_lumaDiff_scale,
+                          paut->dyn[ihigh].mdWgt_baseHdrS.sw_mgeT_lumaDiff_scale, ratio);
 
     pMergeCtx->CurrData.CtrlData.MoveCoef = pMergeCtx->NextCtrlData.MoveCoef;
     pMergeCtx->NextCtrlData.MergeOEDamp   = paut->sta.sw_mgeT_oeDamp_val;

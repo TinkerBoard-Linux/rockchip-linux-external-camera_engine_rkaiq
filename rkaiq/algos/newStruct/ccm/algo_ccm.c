@@ -27,6 +27,11 @@
 #include "interpolation.h"
 #include "c_base/aiq_base.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "include/algo_ccm_info.h"
+#include "rk_info_utils.h"
+#endif
+
 // RKAIQ_BEGIN_DECLARE
 
 static int illu_estm_once(accm_param_illuLink_t *illuLinks, uint8_t illuLink_len, float awbGain[2]) {
@@ -309,7 +314,7 @@ CcmSelectParam(CcmContext_t *pCcmCtx, ccm_param_t* out, int iso)
     ccm_api_attrib_t* tunning = &pCcmCtx->ccm_attrib->tunning;
     accm_param_isoLink_t* isoLink = tunning->stAuto.dyn.isoLink;
 
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pCcmCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
 
     if (ratio > 0.5)
@@ -354,6 +359,7 @@ XCamReturn Accm_prepare(RkAiqAlgoCom* params)
     CcmContext_t* pCcmCtx = (CcmContext_t *)params->ctx;
     pCcmCtx->ccm_attrib =
         (ccm_calib_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, ccm));
+    pCcmCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
 
     pCcmCtx->pre_illu_idx = INVALID_ILLU_IDX;
     pCcmCtx->pre_saturation = 0.0;
@@ -529,6 +535,17 @@ processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outparams)
     return XCAM_RETURN_NO_ERROR;
 }
 
+#if RKAIQ_HAVE_DUMPSYS
+static int dump(const RkAiqAlgoCom* config, st_string* result)
+{
+    // ccm_dump_mod_param(config, result);
+    // ccm_dump_mod_attr(config, result);
+    ccm_dump_mod_status(config, result);
+
+    return 0;
+}
+#endif
+
 XCamReturn
 algo_ccm_queryaccmStatus
 (
@@ -618,6 +635,9 @@ RkAiqAlgoDescription g_RkIspAlgoDescCcm = {
     .pre_process = NULL,
     .processing = processing,
     .post_process = NULL,
+#if RKAIQ_HAVE_DUMPSYS
+    .dump = dump,
+#endif
 };
 
 // RKAIQ_END_DECLARE

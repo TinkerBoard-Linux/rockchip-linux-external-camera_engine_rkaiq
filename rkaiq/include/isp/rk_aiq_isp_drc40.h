@@ -20,6 +20,44 @@
 
 #define DRC_CURVE_LEN 17
 
+typedef struct drc_loBifiltLP_LP_s {
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(hw_drcT_lp_en),
+        M4_TYPE(bool),
+        M4_DEFAULT(0),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(1),
+        M4_NOTES(Disable part of none-local means.
+        Freq of use: high))  */
+    // reg: sw_adrc_bf_lp_en
+    bool hw_drcT_lp_en;
+} drc_loBifiltLP_LP_t;
+
+typedef struct drc_drcLP_s {
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(loBifiltLP),
+        M4_TYPE(struct),
+        M4_UI_MODULE(normal_ui_style),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(2),
+        M4_NOTES(TODO))  */
+    drc_loBifiltLP_LP_t loBifiltLP;
+} drc_drcLP_t;
+
+typedef struct {
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(lowPowerCfg),
+        M4_TYPE(struct),
+        M4_UI_MODULE(normal_ui_style),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(0),
+        M4_NOTES(TODO))  */
+    drc_drcLP_t lowPowerCfg;
+} drc_params_static_t;
+
 typedef enum drc_curveCfg_mode_e {
     drc_cfgCurveDirect_mode    = 0,
     drc_cfgCurveCtrlCoeff_mode = 1
@@ -412,9 +450,15 @@ typedef enum drc_drcGainLimit_mode_e {
     drc_drcGainLmt_manual_mode = 1
 } drc_drcGainLimit_mode_t;
 
+typedef enum adrc_drcCurve_mode_e {
+    adrc_usrConfig_mode     = 0,
+    adrc_vendorDefault_mode = 1,
+    adrc_auto_mode          = 2
+} adrc_drcCurve_mode_t;
+
 typedef struct drc_drcProc_s {
     /* M4_GENERIC_DESC(
-   M4_ALIAS(hw_adrc_hiDetail_ratio),
+   M4_ALIAS(hw_drcT_hfDarkRegion_strg),
    M4_TYPE(f32),
    M4_SIZE_EX(1,1),
    M4_RANGE_EX(0,1),
@@ -426,9 +470,9 @@ typedef struct drc_drcProc_s {
    M4_NOTES(Adjust the local contrast of the DRC process through this parameter.
    The larger the parameter, the higher the low-light zone contrast..\n
    Freq of use: high))  */
-    float hw_drcT_drcStrg_alpha;
+    float hw_drcT_hfDarkRegion_strg;
     /* M4_GENERIC_DESC(
-    M4_ALIAS(hw_adrc_loDetail_ratio),
+    M4_ALIAS(hw_drcT_locDetail_strg),
     M4_TYPE(f32),
     M4_SIZE_EX(1,1),
     M4_RANGE_EX(0,1),
@@ -441,12 +485,12 @@ typedef struct drc_drcProc_s {
     The larger the parameter, the higher the local contrast.\n
     Freq of use: high))  */
     // reg: hw_adrc_loDetail_ratio
-    float hw_drcT_loDetail_strg;
+    float hw_drcT_locDetail_strg;
     /* M4_GENERIC_DESC(
         M4_ALIAS(sw_drcT_drcCurve_mode),
         M4_TYPE(enum),
-        M4_ENUM_DEF(drc_drcCurve_mode_t),
-        M4_DEFAULT(drc_vendorDefault_mode),
+        M4_ENUM_DEF(adrc_drcCurve_mode_t),
+        M4_DEFAULT(adrc_vendorDefault_mode),
         M4_GROUP_CTRL(drcCurve_mode_group),
         M4_HIDE_EX(0),
         M4_RO(0),
@@ -454,7 +498,7 @@ typedef struct drc_drcProc_s {
         M4_NOTES(Through this parameter, users can select two configuration options for the dynamic
        range compression curve(hdr2sdr_curve): user config and vendor default. Reference enum types.
         Freq of use: high))  */
-    drc_drcCurve_mode_t sw_drcT_drcCurve_mode;
+    adrc_drcCurve_mode_t sw_drcT_drcCurve_mode;
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_adrc_compsIdxLuma_scale),
         M4_TYPE(f32),
@@ -477,13 +521,13 @@ typedef struct drc_drcProc_s {
         M4_UI_MODULE(drc_curve),
         M4_DEFAULT([0, 71, 139, 203, 263, 320, 374, 426, 475, 566, 649, 724, 794, 858, 918, 972, 1024]),
         M4_DATAX([0, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 10240, 12288, 14336, 16384, 18432, 20480, 22528, 24576]),
-        M4_GROUP(drcCurve_mode_group:drc_usrConfig_mode),
+        M4_GROUP(drcCurve_mode_group:adrc_usrConfig_mode),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(1),
         M4_NOTES(Users
        can directly configure the drc curve  through hdr2sdr_curve when drcCurve_mode ==
-       drc_usrConfig_mode.\n Freq of use: high))  */
+       adrc_usrConfig_mode.\n Freq of use: high))  */
     // reg: hw_adrc_luma2compsLuma_mVal0~16
     uint16_t hw_drcT_hdr2Sdr_curve[DRC_CURVE_LEN];
     /* M4_GENERIC_DESC(
@@ -599,6 +643,17 @@ typedef struct drc_params_dyn_s {
 } drc_params_dyn_t;
 
 typedef struct drc_param_s {
+#if ISP_HW_V33
+    /* M4_GENERIC_DESC(
+    M4_ALIAS(sta),
+    M4_TYPE(struct),
+    M4_UI_MODULE(static_ui),
+    M4_HIDE_EX(0),
+    M4_RO(0),
+    M4_ORDER(1),
+    M4_NOTES(TODO))  */
+    drc_params_static_t sta;
+#endif
     /* M4_GENERIC_DESC(
         M4_ALIAS(dynamic_param),
         M4_TYPE(struct),

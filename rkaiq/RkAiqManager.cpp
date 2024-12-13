@@ -1356,7 +1356,8 @@ void RkAiqManager::unsetTuningCalibDb(bool isNeedFreeCalib)
 XCamReturn RkAiqManager::setVicapStreamMode(int on, bool isSingleMode)
 {
     SmartPtr<CamHwIsp20> camHwIsp20 = mCamHw.dynamic_cast_ptr<CamHwIsp20>();
-    return camHwIsp20->setVicapStreamMode(on, isSingleMode);
+    mRkAiqAnalyzer->setAovMode(!on);
+    return camHwIsp20->setVicapStreamMode(on, isSingleMode);;
 }
 
 } //namespace RkCam

@@ -15,6 +15,7 @@
 #if RKAIQ_HAVE_SHARP_V40
 #include "rk_aiq_isp_texEst40.h"
 #endif
+#include "rk_aiq_isp_gain20.h"
 
 typedef struct RKAiqAecExpInfo_s RKAiqAecExpInfo_t;
 
@@ -48,6 +49,7 @@ typedef struct {
     bool isFirstFrame;
     uint8_t frameNum;
     float preDGain;
+    float preDGain_preFrm;
     int frameIso[3];
     float frameEt[3];
     float frameDGain[3];
@@ -58,19 +60,30 @@ typedef struct {
     RKAiqAecExpInfo_t *ae_exp;
     blc_res_cvt_t blc_res;
     bool use_aiisp;
-    bool cnr_path_valid;
-    int ynr_count;
-    int sharp_count;
+    int warning_signal;
+    int warning_count;
+    bool cnr_path_en;
     float L2S_Ratio;
 #ifdef USE_NEWSTRUCT
     float ynr_sigma[HIST_SIGMA_LUT_NUM];
 #endif
     bool cmps_on;
+    bool cmps_is15bit;
+    uint8_t cmps_offsetbit;
     bool dehaze_en;
     bool histeq_en;
 #if defined(ISP_HW_V33)
     texEst_param_t texEst_param;
 #endif
+    bool btnr_en;
+    int btnrCfg_pixDomain_mode;
+#if defined(ISP_HW_V33)
+    int sw_btnrT_outFrmBase_mode;
+#endif
+    int drc_warning_count;
+    int blc_warning_count;
+    int btnr_warning_count;
+    void* pBlcInfo;
 } common_cvt_info_t;
 
 typedef struct {

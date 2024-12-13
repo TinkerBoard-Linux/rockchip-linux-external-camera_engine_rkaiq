@@ -819,9 +819,17 @@ RkAiqCore::analyzeInternal(enum rk_aiq_core_analyze_type_e grp_type)
                 if (mAlogsComSharedParams.init || !isGroupAlgo(type)) {
                     ret = curHdl->updateConfig(true);
                     ret = curHdl->preProcess();
-                    if (ret) break;
+                    if (ret) {
+                        LOGW("cid[%d], preProc %d error", mAlogsComSharedParams.mCamPhyId, type);
+                        curHdl->genIspResult(aiqParams, curParams.ptr());
+                        break;
+                    }
                     ret = curHdl->processing();
-                    if (ret) break;
+                    if (ret) {
+                        LOGW("cid[%d], Proc %d error", mAlogsComSharedParams.mCamPhyId, type);
+                        curHdl->genIspResult(aiqParams, curParams.ptr());
+                        break;
+                    }
                     ret = algoHdl->postProcess();
                     curHdl->genIspResult(aiqParams, curParams.ptr());
                 }
@@ -2531,6 +2539,7 @@ void RkAiqCore::mapModStrListToEnum(TuningCalib* change_name_list) {
         {"cp", RK_AIQ_ALGO_TYPE_ACP},
         {"ie", RK_AIQ_ALGO_TYPE_AIE},
         {"lsc", RK_AIQ_ALGO_TYPE_ALSC},
+        {"bayernr", RK_AIQ_ALGO_TYPE_ARAWNR},
         {"bayer2dnr", RK_AIQ_ALGO_TYPE_ARAWNR},
         {"bayertnr", RK_AIQ_ALGO_TYPE_AMFNR},
         {"ynr", RK_AIQ_ALGO_TYPE_AYNR},
@@ -2630,7 +2639,7 @@ XCamReturn RkAiqCore::calibTuning(const CamCalibDbV2Context_t* aiqCalib,
     }
 
     notifyUpdate(grpMask);
-    if (mState != RK_AIQ_CORE_STATE_RUNNING)
+    if (mState != RK_AIQ_CORE_STATE_RUNNING || mIsAovMode)
         updateCalib(RK_AIQ_CORE_ANALYZE_ALL);
     else {
         waitUpdateDone();
@@ -3738,8 +3747,13 @@ XCamReturn RkAiqCore::waitUpdateDone()
 {
     SmartLock lock (_update_mutex);
 
-    while (groupUpdateMask != 0) {
-        _update_done_cond.timedwait(_update_mutex, 100000ULL);
+    int times = 12;
+    while (times-- > 0 && groupUpdateMask != 0) {
+        _update_done_cond.timedwait(_update_mutex, 10000ULL);
+    }
+
+    if (groupUpdateMask != 0) {
+        LOGW_ANALYZER("calib not updated completely !");
     }
 
     return XCamReturn();

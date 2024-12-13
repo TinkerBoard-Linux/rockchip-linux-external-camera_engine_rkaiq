@@ -222,7 +222,7 @@ typedef rk_aiq_isp_params_t<rk_aiq_isp_cac_v32_t>             rk_aiq_isp_cac_par
 #endif
 
 #ifdef ISP_HW_V39
-typedef rk_aiq_isp_params_t<rk_aiq_isp_awb_meas_cfg_v39_t>    rk_aiq_isp_awb_params_t;
+//typedef rk_aiq_isp_params_t<rk_aiq_isp_awb_meas_cfg_v39_t>    rk_aiq_isp_awb_params_t;
 typedef rk_aiq_isp_params_t<rk_aiq_isp_wb_gain_v32_t>         rk_aiq_isp_awb_gain_params_t;
 #if USE_NEWSTRUCT
 typedef rk_aiq_isp_params_t<afStats_cfg_t>                    rk_aiq_isp_af_params_t;
@@ -281,7 +281,6 @@ typedef rk_aiq_isp_params_t<dpc_param_t>          rk_aiq_isp_dpcc_params_t;
 typedef rk_aiq_isp_params_t<gic_param_t>         rk_aiq_isp_gic_params_t;
 typedef rk_aiq_isp_params_t<yme_param_t>         rk_aiq_isp_yme_params_t;
 typedef rk_aiq_isp_params_t<cac_param_t>      rk_aiq_isp_cac_params_t;
-typedef rk_aiq_isp_params_t<ldch_param_t>      rk_aiq_isp_ldch_params_t;
 typedef rk_aiq_isp_params_t<mge_param_t>      rk_aiq_isp_merge_params_t;
 typedef rk_aiq_isp_params_t<lsc_param_t>      rk_aiq_isp_lsc_params_t;
 typedef rk_aiq_isp_params_t<rgbir_param_t>         rk_aiq_isp_rgbir_params_t;

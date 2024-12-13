@@ -17,13 +17,14 @@
 #ifndef _AIQ_CAMHW_BASE_H_
 #define _AIQ_CAMHW_BASE_H_
 
+#include "algos/aiisp/rk_aiisp.h"
 #include "c_base/aiq_cond.h"
+#include "common/aiq_notifier.h"
 #include "hwi_c/aiq_aiIspLoader.h"
 #include "hwi_c/aiq_ispParamsSplitter.h"
 #include "hwi_c/aiq_sensorHw.h"
 #include "hwi_c/aiq_spStreamProcUnit.h"
 #include "hwi_c/aiq_stream.h"
-#include "algos/aiisp/rk_aiisp.h"
 #include "include/iq_parser_v2/aec_head.h"
 #include "include/iq_parser_v2/af_head.h"
 #include "include/iq_parser_v2/sensorinfo_head.h"
@@ -148,6 +149,13 @@ typedef struct SnsFullInfoWraps_s {
     struct SnsFullInfoWraps_s* next;
 } SnsFullInfoWraps_t;
 
+typedef struct exgain_s {
+    uint8_t exgain_bypass;
+    uint8_t local_gain_bypass;
+    uint8_t gain_bypass_en;
+    bool gain_module_en;
+} exgain_t;
+
 typedef struct AiqCamHwBase_s {
     AiqSensorHw_t* _mSensorDev;
     AiqIspParamsCvt_t* _mIspParamsCvt;
@@ -170,13 +178,17 @@ typedef struct AiqCamHwBase_s {
     bool _linked_to_serdes;
     char sns_name[32];
     uint64_t _isp_module_ens;
+    exgain_t exgain_status;
+
     bool mNoReadBack;
     rk_aiq_rotation_t _sharp_fbc_rotation;
 
     rk_aiq_ldch_share_mem_info_t ldch_mem_info_array[2 * ISP2X_MESH_BUF_NUM];
+    rk_aiq_ldcv_share_mem_info_t ldcv_mem_info_array[2 * ISP2X_MESH_BUF_NUM];
     rk_aiq_cac_share_mem_info_t cac_mem_info_array[2 * ISP3X_MESH_BUF_NUM];
     rk_aiq_dbg_share_mem_info_t dbg_mem_info_array[2 * RKISP_INFO2DDR_BUF_MAX];
     drv_share_mem_ctx_t _ldch_drv_mem_ctx;
+    drv_share_mem_ctx_t _ldcv_drv_mem_ctx;
     drv_share_mem_ctx_t _cac_drv_mem_ctx;
     drv_share_mem_ctx_t _dbg_drv_mem_ctx;
     isp_drv_share_mem_ops_t _drv_share_mem_ops;
@@ -238,6 +250,8 @@ typedef struct AiqCamHwBase_s {
     // internal override
     void (*updateEffParams)(AiqCamHwBase_t* pCamHw, void* params, void* ori_params);
     bool (*processTb)(AiqCamHwBase_t* pCamHw, void* params);
+    XCamReturn (*saveInfotoFileTb)(AiqCamHwBase_t* pCamHw);
+    XCamReturn (*getLastEffectParamTb)(AiqCamHwBase_t* pCamHw);
 
     // AIISP
     bool use_aiisp;
@@ -249,6 +263,25 @@ typedef struct AiqCamHwBase_s {
     XCamReturn (*read_aiisp_result)(AiqCamHwBase_t* pCamHw);
     XCamReturn (*get_aiisp_bay3dbuf)(AiqCamHwBase_t* pCamHw);
     XCamReturn (*aiisp_processing)(AiqCamHwBase_t* pCamHw, rk_aiq_aiisp_t* aiisp_evt);
+
+    // dumpsys
+    int (*dump)(void* pCamHw, st_string* result, int argc, void* argv[]);
+#if RKAIQ_HAVE_DUMPSYS
+    struct aiq_notifier notifier;
+    struct aiq_notifier_subscriber sub_base;
+    struct aiq_notifier_subscriber sub_sensor;
+    struct aiq_notifier_subscriber sub_params_cvt;
+    struct aiq_notifier_subscriber sub_stream_cap;
+    struct aiq_notifier_subscriber sub_stream_proc;
+    struct aiq_notifier_subscriber sub_isp_params;
+    struct aiq_notifier_subscriber sub_isp_active_params;
+
+    struct aiq_notifier_subscriber sub_isp_mods[_MODS_COUNT];
+
+    FrameDumpInfo_t fs;
+    FrameDumpInfo_t prev_fs;
+    FrameDumpInfo_t stats;
+#endif
 } AiqCamHwBase_t;
 
 rk_aiq_static_info_t* AiqCamHw_getStaticCamHwInfo(const char* sns_ent_name, uint16_t index);
@@ -339,6 +372,7 @@ AiqSensorExpInfo_t* Aiqisp20Evt_getExpInfoParams(Aiqisp20Evt_t* pEvt, uint32_t f
 XCamReturn AiqCamHw_setVicapStreamMode(AiqCamHwBase_t* pCamHw, int mode, bool is_single_mode);
 rk_sensor_full_info_t* AiqCamHw_getFullSnsInfo(const char* sensor_name);
 aiq_isp_effect_params_t* AiqCamHw_getParamsForEffMap(AiqCamHwBase_t* pCamHw, uint32_t frame_id);
+XCamReturn AiqCam_FastBootSetLastEffectParam(AiqCamHwBase_t* pCamHw);
 
 #define CamHW_setManager(pMan, pRkAiqManager) \
         (pMan)->rkAiqManager = pRkAiqManager

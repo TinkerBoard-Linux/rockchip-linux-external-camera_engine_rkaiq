@@ -47,6 +47,7 @@
 #include "algo_handlers/RkAiqHisteqHandler.h"
 #include "algo_handlers/RkAiqEnhHandler.h"
 #include "algo_handlers/RkAiqHsvHandler.h"
+#include "algo_handlers/RkAiqLdcHandler.h"
 
 typedef AiqAlgoHandler_t* (*pAiqAlgoHandler_construct)(RkAiqAlgoDesComm* des, AiqCore_t* aiqCore);
 typedef void (*pAiqAlgoHandler_destruct)(AiqAlgoHandler_t* pAlgoHandler);
@@ -90,14 +91,19 @@ struct {
     {RK_AIQ_ALGO_TYPE_ADHAZ, AiqAlgoHandlerDehaze_constructor, AiqAlgoHandler_destructor},
     {RK_AIQ_ALGO_TYPE_A3DLUT, AiqAlgoHandler3dlut_constructor, AiqAlgoHandler_destructor},
     {RK_AIQ_ALGO_TYPE_ARGBIR, AiqAlgoHandlerRgbir_constructor, AiqAlgoHandler_destructor},
+#if RKAIQ_HAVE_YUVME
     {RK_AIQ_ALGO_TYPE_AMD, AiqAlgoHandlerYme_constructor, AiqAlgoHandler_destructor},
+#endif
 #ifdef RKAIQ_HAVE_AF
     {RK_AIQ_ALGO_TYPE_AF, AiqAlgoHandlerAf_constructor, AiqAlgoHandler_destructor},
 #endif
 #endif
+#if RKAIQ_HAVE_LDC
+    {RK_AIQ_ALGO_TYPE_ALDC, AiqAlgoHandlerLdc_constructor, AiqAlgoHandler_destructor},
+#endif
 };
 
-// global handlers info end 
+// global handlers info end
 
 XCamReturn AiqAlgoHandler_constructor(AiqAlgoHandler_t* pAlgoHandler, RkAiqAlgoDesComm* des,
                                       AiqCore_t* aiqCore) {

@@ -17,6 +17,9 @@
 
 #include "aiq_rawStreamCapUnit.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "aiq_streamCapInfo.h"
+#endif
 #include "c_base/aiq_list.h"
 #include "hwi_c/aiq_CamHwBase.h"
 #include "hwi_c/aiq_rawStreamProcUnit.h"
@@ -133,6 +136,20 @@ XCamReturn RawStreamCapUnit_poll_buffer_ready(void* ctx, AiqHwEvt_t* evt, int de
     AiqRawStreamCapUnit_t* pRawStrCapUnit = (AiqRawStreamCapUnit_t*)ctx;
     AiqV4l2Buffer_t *buf_s = NULL, *buf_m = NULL, *buf_l = NULL;
 
+#if RKAIQ_HAVE_DUMPSYS
+    // dump fe info
+    if (dev_index == ISP_MIPI_HDR_S) {
+        struct timespec time;
+        clock_gettime(CLOCK_MONOTONIC, &time);
+
+        pRawStrCapUnit->fe.frameloss +=
+            evt->frame_id ? evt->frame_id - pRawStrCapUnit->fe.id - 1 : 0;
+        pRawStrCapUnit->fe.id        = evt->frame_id;
+        pRawStrCapUnit->fe.timestamp = evt->mTimestamp;
+        pRawStrCapUnit->fe.delay     = XCAM_TIMESPEC_2_USEC(time) - evt->mTimestamp;
+    }
+#endif
+
     aiqMutex_lock(&pRawStrCapUnit->_buf_mutex);
     AiqVideoBuffer_ref(evt->vb);
     aiqList_push(pRawStrCapUnit->buf_list[dev_index], &evt->vb);
@@ -179,6 +196,9 @@ XCamReturn AiqRawStreamCapUnit_init(AiqRawStreamCapUnit_t* pRawStrCapUnit,
     pRawStrCapUnit->_mipi_dev_max   = 1;
     pRawStrCapUnit->_state          = RAW_CAP_STATE_INVALID;
     pRawStrCapUnit->_isExtDev       = false;
+#if RKAIQ_HAVE_DUMPSYS
+    pRawStrCapUnit->data_mode = 0;
+#endif
     aiqMutex_init(&pRawStrCapUnit->_buf_mutex);
     aiqMutex_init(&pRawStrCapUnit->_mipi_mutex);
     /*
@@ -401,12 +421,14 @@ XCamReturn AiqRawStreamCapUnit_stop(AiqRawStreamCapUnit_t* pRawStrCapUnit) {
     for (i = 0; i < pRawStrCapUnit->_mipi_dev_max; i++) {
         AiqListItem_t* pItem = NULL;
         bool rm              = false;
-        AIQ_LIST_FOREACH(pRawStrCapUnit->buf_list[i], pItem, rm) {
-            AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
-            pItem = aiqList_erase_item_locked(pRawStrCapUnit->buf_list[i], pItem);
-            rm    = true;
+        if (pRawStrCapUnit->buf_list[i]) {
+            AIQ_LIST_FOREACH(pRawStrCapUnit->buf_list[i], pItem, rm) {
+                AiqV4l2Buffer_unref(*(AiqV4l2Buffer_t**)(pItem->_pData));
+                pItem = aiqList_erase_item_locked(pRawStrCapUnit->buf_list[i], pItem);
+                rm    = true;
+            }
+            aiqList_reset(pRawStrCapUnit->buf_list[i]);
         }
-        aiqList_reset(pRawStrCapUnit->buf_list[i]);
     }
     aiqMutex_unlock(&pRawStrCapUnit->_buf_mutex);
     for (i = 0; i < pRawStrCapUnit->_mipi_dev_max; i++) {
@@ -632,6 +654,27 @@ void AiqRawStreamCapUnit_skip_frames(AiqRawStreamCapUnit_t* pRawStrCapUnit, int 
     aiqMutex_unlock(&pRawStrCapUnit->_mipi_mutex);
 }
 
+void AiqRawStreamCapUnit_stop_vicap_stream_only(AiqRawStreamCapUnit_t* pRawStrCapUnit) {
+
+    int skip_frm = 0;
+    if (pRawStrCapUnit->_dev[0]) {
+        pRawStrCapUnit->_dev[0]->io_control(pRawStrCapUnit->_dev[0], RKCIF_CMD_SET_SENSOR_FLIP_START,
+                                            &skip_frm);
+    }
+}
+
+void AiqRawStreamCapUnit_skip_frame_and_restart_vicap_stream(AiqRawStreamCapUnit_t* pRawStrCapUnit, int skip_frm_cnt) {
+
+    if (skip_frm_cnt < 2) {
+        skip_frm_cnt = 2;
+    }
+
+    if (pRawStrCapUnit->_dev[0]) {
+        pRawStrCapUnit->_dev[0]->io_control(pRawStrCapUnit->_dev[0], RKCIF_CMD_SET_SENSOR_FLIP_END,
+                                            &skip_frm_cnt);
+    }
+}
+
 XCamReturn AiqRawStreamCapUnit_reset_hardware(AiqRawStreamCapUnit_t* pRawStrCapUnit) {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
     if (pRawStrCapUnit->_dev[0]) {
@@ -680,6 +723,9 @@ XCamReturn AiqRawStreamCapUnit_set_csi_mem_word_big_align(AiqRawStreamCapUnit_t*
                 ret = XCAM_RETURN_ERROR_IOCTL;
             } else {
                 LOGD_CAMHW_SUBM(ISP20HW_SUBM, "set the memory mode of vicap to big align");
+#if RKAIQ_HAVE_DUMPSYS
+                pRawStrCapUnit->data_mode = mem_mode;
+#endif
             }
         }
     }
@@ -721,3 +767,18 @@ void AiqRawStreamCapUnit_setSensorCategory(AiqRawStreamCapUnit_t* pRawStrCapUnit
 void AiqRawStreamCapUnit_setCamPhyId(AiqRawStreamCapUnit_t* pRawStrCapUnit, int phyId) {
     pRawStrCapUnit->mCamPhyId = phyId;
 }
+
+#if RKAIQ_HAVE_DUMPSYS
+int AiqRawStreamCapUnit_dump(void* dumper, st_string* result, int argc, void* argv[]) {
+    AiqRawStreamCapUnit_t* pRawStrCapUnit = (AiqRawStreamCapUnit_t*)dumper;
+    if (pRawStrCapUnit->_state != RAW_CAP_STATE_STARTED) return 0;
+
+    stream_cap_dump_mod_param(pRawStrCapUnit, result);
+    stream_cap_dump_dev_attr(pRawStrCapUnit, result);
+    stream_cap_dump_chn_attr(pRawStrCapUnit, result);
+    stream_cap_dump_chn_status(pRawStrCapUnit, result);
+    stream_cap_dump_videobuf_status(pRawStrCapUnit, result);
+
+    return 0;
+}
+#endif

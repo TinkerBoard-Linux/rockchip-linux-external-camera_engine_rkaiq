@@ -74,10 +74,11 @@ static LutBuffer* LutBufferManagerGetFreeHwBuffer(LutBufferManager *man, uint8_t
     return NULL;
 }
 
-static void LutBufferManagerDeinit(LutBufferManager *man)
+void LutBufferManagerDeinit(cac_cvt_info_t *cacInfo, LutBufferManager *man)
 {
     LutBufferManagerReleaseHwBuffers(man, 0);
-    LutBufferManagerReleaseHwBuffers(man, 1);
+    if (cacInfo->is_multi_isp)
+        LutBufferManagerReleaseHwBuffers(man, 1);
 }
 
 static inline bool IsIspBigMode(uint32_t width, uint32_t height, bool is_multi_sensor) {
@@ -173,6 +174,7 @@ static XCamReturn rk_aiq_cac21_update_lut(cac_cvt_info_t *cacInfo, char *sw_cacT
         return XCAM_RETURN_NO_ERROR;
     }
     cacInfo->current_lut_size = 0;
+    aiq_free(cacInfo->current_lut_[0]);
     cacInfo->current_lut_[0] = buf;
     cacInfo->current_lut_size++;
     if (buf->State != kInitial) {
@@ -185,6 +187,7 @@ static XCamReturn rk_aiq_cac21_update_lut(cac_cvt_info_t *cacInfo, char *sw_cacT
             LOGW_ACAC("No buffer available, maybe only one buffer ?!");
             return XCAM_RETURN_NO_ERROR;
         }
+        aiq_free(cacInfo->current_lut_[1]);
         cacInfo->current_lut_[1] = buf2;
         cacInfo->current_lut_size++;
     }

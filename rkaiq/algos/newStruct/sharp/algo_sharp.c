@@ -44,7 +44,7 @@ XCamReturn SharpSelectParam
     int iso_low = 0, iso_high = 0, ilow = 0, ihigh = 0, inear = 0;
     float ratio = 0.0f;
     uint16_t uratio;
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pSharpCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
     if (ratio > 0.5)
         inear = ihigh;
@@ -108,7 +108,6 @@ XCamReturn SharpSelectParam
                 paut->dyn[ilow].dHfDetailShp.locShpStrg_texRegion.hw_shpT_edgeRegionL_strg, paut->dyn[ihigh].dHfDetailShp.locShpStrg_texRegion.hw_shpT_edgeRegionL_strg, ratio);
     out->dyn.dHfDetailShp.locShpStrg_texRegion.hw_shpT_edgeRegionR_strg = interpolation_f32(
                 paut->dyn[ilow].dHfDetailShp.locShpStrg_texRegion.hw_shpT_edgeRegionR_strg, paut->dyn[ihigh].dHfDetailShp.locShpStrg_texRegion.hw_shpT_edgeRegionR_strg, ratio);
-    out->dyn.dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode = paut->dyn[inear].dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode;
     out->dyn.dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred = interpolation_f32(
                 paut->dyn[ilow].dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, paut->dyn[ihigh].dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, ratio);
     out->dyn.dHfDetailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgMot_minThred = interpolation_f32(
@@ -199,7 +198,6 @@ XCamReturn SharpSelectParam
         out->dyn.detailShp.shootReduction.hw_shpT_luma2DetailNegClip_val[i] = interpolation_u16(
                     paut->dyn[ilow].detailShp.shootReduction.hw_shpT_luma2DetailNegClip_val[i], paut->dyn[ihigh].detailShp.shootReduction.hw_shpT_luma2DetailNegClip_val[i], uratio);
     }
-    out->dyn.detailShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode = paut->dyn[inear].detailShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode;
     out->dyn.detailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred = interpolation_f32(
                 paut->dyn[ilow].detailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, paut->dyn[ihigh].detailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, ratio);
     out->dyn.detailShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgMot_minThred = interpolation_f32(
@@ -235,15 +233,14 @@ XCamReturn SharpSelectParam
     out->dyn.edgeShp.locShpStrg_edge.edgeStrgCurveCtrl.sw_shpT_edgeStrg_minLimit = interpolation_f32(
                 paut->dyn[ilow].edgeShp.locShpStrg_edge.edgeStrgCurveCtrl.sw_shpT_edgeStrg_minLimit, paut->dyn[ihigh].edgeShp.locShpStrg_edge.edgeStrgCurveCtrl.sw_shpT_edgeStrg_minLimit, ratio);
     for (i = 0; i < 17; i++) {
-        out->dyn.edgeShp.locShpStrg_edge.hw_shpT_edgeStrg_val[i] = interpolation_u16(
-                    paut->dyn[ilow].edgeShp.locShpStrg_edge.hw_shpT_edgeStrg_val[i], paut->dyn[ihigh].edgeShp.locShpStrg_edge.hw_shpT_edgeStrg_val[i], uratio);
+        out->dyn.edgeShp.locShpStrg_edge.hw_shpT_edge2ShpStrg_val[i] = interpolation_u16(
+                    paut->dyn[ilow].edgeShp.locShpStrg_edge.hw_shpT_edge2ShpStrg_val[i], paut->dyn[ihigh].edgeShp.locShpStrg_edge.hw_shpT_edge2ShpStrg_val[i], uratio);
     }
     out->dyn.edgeShp.shootReduction.sw_shpT_maxMinFlt_mode = paut->dyn[inear].edgeShp.shootReduction.sw_shpT_maxMinFlt_mode;
     out->dyn.edgeShp.shootReduction.sw_shpT_overShoot_alpha = interpolation_f32(
                 paut->dyn[ilow].edgeShp.shootReduction.sw_shpT_overShoot_alpha, paut->dyn[ihigh].edgeShp.shootReduction.sw_shpT_overShoot_alpha, ratio);
     out->dyn.edgeShp.shootReduction.sw_shpT_underShoot_alpha = interpolation_f32(
                 paut->dyn[ilow].edgeShp.shootReduction.sw_shpT_underShoot_alpha, paut->dyn[ihigh].edgeShp.shootReduction.sw_shpT_underShoot_alpha, ratio);
-    out->dyn.edgeShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode = paut->dyn[inear].edgeShp.locShpStrg_motionStrg1.sw_shpT_motionStrg_mode;
     out->dyn.edgeShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred = interpolation_f32(
                 paut->dyn[ilow].edgeShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, paut->dyn[ihigh].edgeShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgStat_maxThred, ratio);
     out->dyn.edgeShp.locShpStrg_motionStrg1.sw_shpT_locSgmStrgMot_minThred = interpolation_f32(
@@ -276,29 +273,29 @@ XCamReturn texEstSelectParam
     int iso_low = 0, iso_high = 0, ilow = 0, ihigh = 0, inear = 0;
     float ratio = 0.0f;
     uint16_t uratio;
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pSharpCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
     if (ratio > 0.5)
         inear = ihigh;
     else
         inear = ilow;
 
-    out->dyn.noiseEst.hw_texEstT_nsEstThd_mode = paut->dyn[inear].noiseEst.hw_texEstT_nsEstThd_mode;
+    out->dyn.noiseEst.hw_texEstT_nsEstTexThd_mode = paut->dyn[inear].noiseEst.hw_texEstT_nsEstTexThd_mode;
     for (i = 0; i < 17; i++) {
-        out->dyn.noiseEst.hw_texEstT_nsEstManual_thred[i] = interpolation_f32(
-                    paut->dyn[ilow].noiseEst.hw_texEstT_nsEstManual_thred[i], paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstManual_thred[i], ratio);
+        out->dyn.noiseEst.hw_texEstT_nsEstTexManual_thred[i] = interpolation_f32(
+                    paut->dyn[ilow].noiseEst.hw_texEstT_nsEstTexManual_thred[i], paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstTexManual_thred[i], ratio);
     }
     out->dyn.noiseEst.hw_texEstT_nsStatsCntThd_ratio = interpolation_f32(
                 paut->dyn[ilow].noiseEst.hw_texEstT_nsStatsCntThd_ratio, paut->dyn[ihigh].noiseEst.hw_texEstT_nsStatsCntThd_ratio, ratio);
     out->dyn.noiseEst.hw_texEstT_noiseEst_mode = paut->dyn[inear].noiseEst.hw_texEstT_noiseEst_mode;
     out->dyn.noiseEst.hw_texEstT_nsEstMean_alpha = interpolation_f32(
                 paut->dyn[ilow].noiseEst.hw_texEstT_nsEstMean_alpha, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstMean_alpha, ratio);
-    out->dyn.noiseEst.hw_texEstT_nsEstThd_scale = interpolation_f32(
-                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstThd_scale, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstThd_scale, ratio);
-    out->dyn.noiseEst.hw_texEstT_nsEstThd_minLimit = interpolation_f32(
-                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstThd_minLimit, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstThd_minLimit, ratio);
-    out->dyn.noiseEst.hw_texEstT_nsEstThd_maxLimit = interpolation_f32(
-                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstThd_maxLimit, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstThd_maxLimit, ratio);
+    out->dyn.noiseEst.hw_texEstT_nsEstTexThd_scale = interpolation_f32(
+                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstTexThd_scale, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstTexThd_scale, ratio);
+    out->dyn.noiseEst.hw_texEstT_nsEstTexThd_minLimit = interpolation_f32(
+                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstTexThd_minLimit, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstTexThd_minLimit, ratio);
+    out->dyn.noiseEst.hw_texEstT_nsEstTexThd_maxLimit = interpolation_f32(
+                paut->dyn[ilow].noiseEst.hw_texEstT_nsEstTexThd_maxLimit, paut->dyn[ihigh].noiseEst.hw_texEstT_nsEstTexThd_maxLimit, ratio);
     out->dyn.texEst.hw_texEstT_texEst_mode = paut->dyn[inear].texEst.hw_texEstT_texEst_mode;
     out->dyn.texEst.hw_texEstT_nsEstDf1_scale = interpolation_f32(
                 paut->dyn[ilow].texEst.hw_texEstT_nsEstDf1_scale, paut->dyn[ihigh].texEst.hw_texEstT_nsEstDf1_scale, ratio);
@@ -326,6 +323,46 @@ XCamReturn texEstSelectParam
     }
     return XCAM_RETURN_NO_ERROR;
 }
+
+XCamReturn SharpApplyStrength
+(
+    SharpContext_t *pSharpCtx,
+    sharp_param_t* out)
+{
+    if(pSharpCtx == NULL || out == NULL) {
+        LOGE_ANR("%s(%d): null pointer\n", __FUNCTION__, __LINE__);
+        return XCAM_RETURN_ERROR_PARAM;
+    }
+
+    if (pSharpCtx->strength_en) {
+        float fPercent = algo_strength_to_percent(pSharpCtx->fStrength);
+
+        out->dyn.eHfDetailShp.glbShpStrg.hw_shpT_eHfDetail_strg *= fPercent;
+        out->dyn.dHfDetailShp.glbShpStrg.hw_shpT_dHiDetail_strg *= fPercent;
+
+        out->dyn.detailShp.detailExtra_lpfSrc.hw_shpT_detailSrcHf_alpha /= fPercent;
+        out->dyn.detailShp.detailExtra_lpfSrc.hw_shpT_detailSrcMf_alpha /= fPercent;
+        out->dyn.detailShp.glbShpStrg.hw_shpT_detailPos_strg *= fPercent;
+        out->dyn.detailShp.glbShpStrg.hw_shpT_detailNeg_strg *= fPercent;
+        for (int i = 0; i < 9; i++) {
+            out->dyn.detailShp.shootReduction.hw_shpT_tex2DetailPosClip_val[i] *= fPercent;
+            out->dyn.detailShp.shootReduction.hw_shpT_tex2DetailNegClip_val[i] *= fPercent;
+        }
+
+        for (int i = 0; i < 8; i++) {
+            out->dyn.detailShp.shootReduction.hw_shpT_luma2DetailPosClip_val[i] *= fPercent;
+            out->dyn.detailShp.shootReduction.hw_shpT_luma2DetailNegClip_val[i] *= fPercent;
+        }
+
+        out->dyn.edgeShp.glbShpStrg.hw_shpT_edgePos_strg *= fPercent;
+        out->dyn.edgeShp.glbShpStrg.hw_shpT_edgeNeg_strg *= fPercent;
+
+        LOGI_ANR("SharpApplyStrength: fStrength %f, fPercent %f\n", pSharpCtx->fStrength, fPercent);
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+}
+
 #endif
 
 #if RKAIQ_HAVE_SHARP_V34
@@ -346,7 +383,7 @@ XCamReturn SharpSelectParam
     int iso_low = 0, iso_high = 0, ilow = 0, ihigh = 0, inear = 0;
     float ratio = 0.0f;
     uint16_t uratio;
-    pre_interp(iso, NULL, 0, &ilow, &ihigh, &ratio);
+    pre_interp(iso, pSharpCtx->iso_list, 13, &ilow, &ihigh, &ratio);
     uratio = ratio * (1 << RATIO_FIXBIT);
 
     if (ratio > 0.5)
@@ -531,6 +568,7 @@ prepare(RkAiqAlgoCom* params)
     pSharpCtx->texEst_attrib =
         (texEst_api_attrib_t*)(CALIBDBV2_GET_MODULE_PTR(params->u.prepare.calibv2, texEst));
 #endif
+    pSharpCtx->iso_list = params->u.prepare.calibv2->sensor_info->iso_list;
     pSharpCtx->isReCal_ = true;
 
     return result;
@@ -569,7 +607,7 @@ XCamReturn Asharp_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outp
         need_recal = true;
     }
 
-    outparams->cfg_update = true;
+    outparams->cfg_update = false;
     if (need_recal) {
         sharp_res->sta = pCtx->sharp_attrib->stAuto.sta;
 #if RKAIQ_HAVE_SHARP_V34
@@ -578,6 +616,7 @@ XCamReturn Asharp_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outp
 #endif
 #if RKAIQ_HAVE_SHARP_V40
         SharpSelectParam(pCtx, sharp_res, iso);
+        SharpApplyStrength(pCtx, sharp_res);
 #endif
         outparams->cfg_update = true;
         outparams->en = pAttrib->en;

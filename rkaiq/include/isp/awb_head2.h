@@ -19,9 +19,11 @@
 
 #ifndef __AWB_HEADER2_H__
 #define __AWB_HEADER2_H__
-
+#if defined(ISP_HW_V39)
 #include "isp/rk_aiq_stats_awb39.h"
-
+#else //defined(ISP_HW_V33)
+#include "isp/rk_aiq_stats_awb33.h"
+#endif
 
 #define CALD_AWB_LWR_NUM_MAX 8
 #define CALID_AWB_CT_LUT_NUM 8
@@ -878,7 +880,7 @@ typedef struct awb_lgtSrcWgt_s {
         M4_ALIAS(weight),
         M4_TYPE(f32),
         M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,5),
+        M4_RANGE_EX(0,1),
         M4_DEFAULT([1,1,1,1,1,1,1,1,1,1]),
         M4_DIGIT_EX(1),
         M4_HIDE_EX(0),
@@ -1052,6 +1054,21 @@ typedef struct awb_luma2WpWgt_s {
         M4_NOTES( \n
         Freq of use: low))  */
     awb_lum2wgt_enTh_t luma2WpWgtEn_th;
+#ifdef ISP_HW_V33
+    /* M4_GENERIC_DESC(
+        M4_ALIAS(luma2WpWgt_ccm),
+        M4_TYPE(f32),
+        M4_SIZE_EX(3,3),
+        M4_RANGE_EX(-8,8),
+        M4_DEFAULT([1,0,0,0,1,0,0,0,1]),
+        M4_DIGIT_EX(4),
+        M4_HIDE_EX(0),
+        M4_RO(0),
+        M4_ORDER(0),
+        M4_NOTES(\n
+        Freq of use: low))  */
+    float luma2WpWgt_ccm[9];
+#endif
     /* M4_GENERIC_DESC(
         M4_ALIAS(perfectWpBin),
         M4_TYPE(u8),
@@ -1358,6 +1375,7 @@ typedef struct awb_lgtSrc_s {
         M4_NOTES(\n
         Freq of use: high))  */
     awb_xyWpDct_t wpDct_xySpace;
+#ifndef ISP_HW_V33
     /* M4_GENERIC_DESC(
         M4_ALIAS(wpDct_rotYuvSpace),
         M4_TYPE(struct),
@@ -1368,6 +1386,7 @@ typedef struct awb_lgtSrc_s {
         M4_NOTES(\n
         Freq of use: high))  */
     awbStats_rotYuvRegion_t wpDct_rotYuvSpace;
+#endif
     /* M4_GENERIC_DESC(
         M4_ALIAS(bigNorWpWgt),
         M4_TYPE(struct),
@@ -1403,7 +1422,7 @@ typedef struct awb_lgtSrc_s {
 
 
 typedef struct awb_earlAct_s {
-    // M4_BOOL_DESC("earlAct_en", "1");
+    // M4_BOOL_DESC("earlAct_en", "0");
     bool earlAct_en;
     /* M4_GENERIC_DESC(
         M4_ALIAS(mode),
@@ -1576,6 +1595,7 @@ typedef struct awb_Stats_s {
         Freq of use: high))  */
     //reg:sw_rawawb_xy_en0
     bool hw_awbCfg_xyDct_en;
+ #ifndef ISP_HW_V33
     /* M4_GENERIC_DESC(
         M4_ALIAS(hw_awbCfg_rotYuvDct_en),
         M4_TYPE(bool),
@@ -1588,6 +1608,7 @@ typedef struct awb_Stats_s {
         Freq of use: high))  */
     //reg:sw_rawawb_3dyuv_en0
     bool hw_awbCfg_rotYuvDct_en;
+ #endif
    /* M4_GENERIC_DESC(
         M4_ALIAS(sw_awbCfg_lgtPrefer_en),
         M4_TYPE(bool),
@@ -1653,6 +1674,7 @@ typedef struct awb_Stats_s {
         M4_NOTES(Parameters for converting rgb space to xy space\n
         Freq of use: high))  */
     awb_rgb2xy_para_t rgb2xy;
+#ifndef ISP_HW_V33
      /* M4_GENERIC_DESC(
         M4_ALIAS(hw_awbCfg_rgb2RYuv_coeff),
         M4_TYPE(f32),
@@ -1666,6 +1688,7 @@ typedef struct awb_Stats_s {
         M4_NOTES(RGB2ROTYUV coefficient mat.\n
         Freq of use: high))  */
     float hw_awbCfg_rgb2RotYuv_coeff[12];
+#endif
     /* M4_GENERIC_DESC(
         M4_ALIAS(extraWpRange),
         M4_TYPE(struct),
@@ -1810,7 +1833,7 @@ typedef struct awb_smartRun_cfg_s {
         M4_ALIAS(wbGainAlgUdDiff_th),
         M4_TYPE(f32),
         M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,255),
+        M4_RANGE_EX(0,4),
         M4_DEFAULT(0.005),
         M4_DIGIT_EX(4),
         M4_HIDE_EX(0),
@@ -1823,7 +1846,7 @@ typedef struct awb_smartRun_cfg_s {
         M4_ALIAS(wbGainAlgDpDiff_th),
         M4_TYPE(f32),
         M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,255),
+        M4_RANGE_EX(0,4),
         M4_DEFAULT(0.005),
         M4_DIGIT_EX(4),
         M4_HIDE_EX(0),
@@ -1836,7 +1859,7 @@ typedef struct awb_smartRun_cfg_s {
         M4_ALIAS(wbGainHwDiffTh),
         M4_TYPE(f32),
         M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,255),
+        M4_RANGE_EX(0,4),
         M4_DEFAULT(0.05),
         M4_DIGIT_EX(4),
         M4_HIDE_EX(0),
@@ -1871,47 +1894,6 @@ typedef struct awb_smartRun_s {
     awb_smartRun_cfg_t cfg;
 } awb_smartRun_t;
 
-typedef struct awb_tolerance_s {
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(tolerance_len),
-        M4_TYPE(u32),
-        M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,16),
-        M4_DEFAULT(10),
-        M4_DIGIT_EX(0),
-        M4_HIDE_EX(1),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(T\n
-        Freq of use: high))  */
-    int tolerance_len;
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(luma_val),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,255000),
-        M4_DEFAULT([0,0.5,2,4,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768]),
-        M4_DIGIT_EX(1),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(T\n
-        Freq of use: high))  */
-    float luma_val[CALD_AWB_LV_NUM_MAX];
-    /* M4_GENERIC_DESC(
-        M4_ALIAS(tolerance_val),
-        M4_TYPE(f32),
-        M4_SIZE_EX(1,16),
-        M4_RANGE_EX(0,1),
-        M4_DEFAULT(0),
-        M4_DIGIT_EX(4),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(T\n
-        Freq of use: high))  */
-    float tolerance_val[CALD_AWB_LV_NUM_MAX];
-}  awb_tolerance_t;
 
 typedef struct awb_runinterval_s {
     /* M4_GENERIC_DESC(
@@ -2219,32 +2201,6 @@ typedef struct awb_div_wpTh_s {
 } awb_div_wpTh_t;
 
 typedef struct awb_div_s {
-     /* M4_GENERIC_DESC(
-        M4_ALIAS(lvLow_th),
-        M4_TYPE(u32),
-        M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,255000),
-        M4_DEFAULT(110),
-        M4_DIGIT_EX(0),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(T\n
-        Freq of use: high))  */
-    unsigned int lvLow_th;
-     /* M4_GENERIC_DESC(
-        M4_ALIAS(lvHigh_th),
-        M4_TYPE(u32),
-        M4_SIZE_EX(1,1),
-        M4_RANGE_EX(0,255000),
-        M4_DEFAULT(65536),
-        M4_DIGIT_EX(0),
-        M4_HIDE_EX(0),
-        M4_RO(0),
-        M4_ORDER(0),
-        M4_NOTES(T\n
-        Freq of use: high))  */
-    unsigned int lvHigh_th;
     /* M4_GENERIC_DESC(
         M4_ALIAS(wpNumTh),
         M4_TYPE(struct),
@@ -2510,7 +2466,7 @@ typedef struct awb_sgc_s {
         M4_ALIAS(wgtClrGradY),
         M4_TYPE(f32),
         M4_SIZE_EX(1,6),
-        M4_RANGE_EX(0,10000),
+        M4_RANGE_EX(0,1),
         M4_DEFAULT([1, 1, 0.5, 0.5, 0.2, 0]),
         M4_DIGIT_EX(4),
         M4_HIDE_EX(0),
@@ -2641,7 +2597,7 @@ typedef struct awb_sgc_s {
         M4_TYPE(s32),
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(-1,255),
-        M4_DEFAULT(-1),
+        M4_DEFAULT(0),
         M4_DIGIT_EX(0),
         M4_HIDE_EX(0),
         M4_RO(0),

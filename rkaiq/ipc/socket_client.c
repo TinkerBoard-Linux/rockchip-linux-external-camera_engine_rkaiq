@@ -7,11 +7,15 @@
 #include <sys/socket.h>
 #include "socket_client.h"
 #include "xcam_log.h"
+#include "c_base/aiq_base.h"
+#include "uAPI2/rk_aiq_user_api2_stats.h"
+#include "uAPI2/rk_aiq_user_api2_awb.h"
+#include "uAPI2/rk_aiq_user_api2_sysctl.h"
 
 #define USE_IPC_SERVER
 
 #ifdef USE_IPC_SERVER
-#define LOCALSOCKET_NAME "/tmp/UNIX.domain0"
+#define LOCALSOCKET_NAME "/tmp/UNIX.domain"
 #else
 #ifdef __ANDROID__
 #define LOCALSOCKET_NAME "/dev/socket/camera_tool"
@@ -133,9 +137,9 @@ static void *ClientThreadFunc(void *p)
     memset (&addr, 0, sizeof (addr));
 
     /* unix_path_max appears to be missing on linux */
-    namelen = strlen(LOCALSOCKET_NAME);
     addr.sun_family = AF_LOCAL;
-    strcpy(addr.sun_path, LOCALSOCKET_NAME);
+    sprintf(addr.sun_path, "%s%d", LOCALSOCKET_NAME, cid);
+    namelen = strlen(addr.sun_path);
     alen = namelen + offsetof(struct sockaddr_un, sun_path) + 1;
     LOGD_IPC("%s[%d]: local client sun_path %s, len %d", __func__, cid, addr.sun_path, namelen);
 
@@ -195,7 +199,7 @@ int socket_client_start(void *aiqctx, SocketClientCtx_t *ctx, int cid) {
     message_receiver_init(&ctx->mReceiver);
     ctx->mReceiver.aiqctx = aiqctx;
 
-    ctx->recvbuf = malloc(BUF_SIZE);
+    ctx->recvbuf = aiq_mallocz(BUF_SIZE);
     if (ctx->recvbuf == NULL) {
         LOGE_IPC("%s[%d]: malloc recvbuf error", __func__, cid);
         return -1;
@@ -228,7 +232,9 @@ void socket_client_exit(SocketClientCtx_t *ctx) {
     }
 
     if (ctx->recvbuf)
-        free(ctx->recvbuf);
+        aiq_free(ctx->recvbuf);
+    if (ctx->data_fd && ctx->data_fd != ctx->sockfd)
+        close(ctx->data_fd);
     if (ctx->sockfd)
         close(ctx->sockfd);
     if (ctx->stopfd[0])
@@ -250,7 +256,7 @@ void socket_client_setNote(SocketClientCtx_t *ctx, uint32_t ret, char *str)
 
     if (rec->note[0] == 0) {
         if (str)
-            strcpy(rec->note, str);
+            strncpy(rec->note, str, 128);
     }
 }
 
@@ -269,3 +275,62 @@ void socket_client_setEnable(SocketClientCtx_t *ctx, bool enable)
     ctx->enable = enable;
 }
 
+static void copyRkAiqExpParamComb_t2RkToolExpParam_t(RkAiqExpParamComb_t *in, RkToolExpParam_t *out)
+{
+    // copy exp_real_params
+    out->exp_real_params.analog_gain      = in->exp_real_params.analog_gain;
+    out->exp_real_params.dcg_mode         = in->exp_real_params.dcg_mode;
+    out->exp_real_params.digital_gain     = in->exp_real_params.digital_gain;
+    out->exp_real_params.integration_time = in->exp_real_params.integration_time;
+    out->exp_real_params.iso              = in->exp_real_params.iso;
+    out->exp_real_params.isp_dgain        = in->exp_real_params.isp_dgain;
+    out->exp_real_params.longfrm_mode     = in->exp_real_params.longfrm_mode;
+
+    // copy exp_sensor_params
+    out->exp_sensor_params.analog_gain_code_global = in->exp_sensor_params.analog_gain_code_global;
+    out->exp_sensor_params.coarse_integration_time = in->exp_sensor_params.coarse_integration_time;
+    out->exp_sensor_params.digital_gain_global     = in->exp_sensor_params.digital_gain_global;
+    out->exp_sensor_params.fine_integration_time   = in->exp_sensor_params.fine_integration_time;
+    out->exp_sensor_params.isp_digital_gain        = in->exp_sensor_params.isp_digital_gain;
+}
+
+rk_aiq_isp_tool_stats_t *socket_client_get_isp_statics(void* aiqctx)
+{
+    rk_aiq_isp_statistics_t aiq_stats;
+    rk_aiq_isp_tool_stats_t *tool_stats = aiq_mallocz(sizeof(rk_aiq_isp_tool_stats_t));
+
+    XCamReturn ret = rk_aiq_uapi2_stats_getIspStats(aiqctx, &aiq_stats, 300);
+    LOGI_IPC("%s: frameId: %d\n",__func__, tool_stats->frameID);
+    if (ret == XCAM_RETURN_NO_ERROR) {
+        tool_stats->version = 0x0100;
+        tool_stats->frameID = aiq_stats.frame_id;
+        copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.LinearExp, &tool_stats->linearExp);
+        copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.HdrExp[0], &tool_stats->hdrExp[0]);
+        copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.HdrExp[1], &tool_stats->hdrExp[1]);
+        copyRkAiqExpParamComb_t2RkToolExpParam_t(&aiq_stats.aec_stats.ae_exp.HdrExp[2], &tool_stats->hdrExp[2]);
+    } else {
+        LOGE_IPC("%s: call rk_aiq_uapi2_stats_getIspStats error",  __func__);
+    }
+
+    return tool_stats;
+}
+
+int socket_client_writeAwbIn(void* aiqctx, char* data)
+{
+    static int call_cnt = 0;
+    rk_aiq_uapiV2_awb_wrtIn_attr_t attr;
+    memset(&attr, 0, sizeof(rk_aiq_uapiV2_awb_wrtIn_attr_t));
+    attr.en = true;
+    attr.mode = 1; // 1 means rgb ,0 means raw
+    attr.call_cnt = call_cnt++;
+    sprintf(attr.path, "/tmp");
+    LOGI_IPC("%s: data: %s\n",__func__, data);
+    return rk_aiq_user_api2_awb_WriteAwbIn(aiqctx, attr);
+}
+
+int socket_client_enque_rkraw(void* aiqctx, char* data)
+{
+    LOGI_IPC("%s: file: %s\n",__func__, data);
+    rk_aiq_uapi2_sysctl_enqueueRkRawFile(aiqctx, data);
+    return 0;
+}

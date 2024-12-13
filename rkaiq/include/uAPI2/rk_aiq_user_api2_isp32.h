@@ -37,8 +37,10 @@
 #include "uAPI2/rk_aiq_user_api2_gamma.h"
 #include "isp/rk_aiq_isp_ynr32.h"
 #include "uAPI2/rk_aiq_user_api2_ynr.h"
+#ifdef RKAIQ_HAVE_DRC_V12
 #include "isp/rk_aiq_isp_drc32.h"
 #include "uAPI2/rk_aiq_user_api2_drc.h"
+#endif
 #include "isp/rk_aiq_isp_dehaze22.h"
 #include "uAPI2/rk_aiq_user_api2_dehaze.h"
 #include "isp/rk_aiq_isp_sharp32.h"
@@ -50,8 +52,6 @@
 #include "uAPI2/rk_aiq_user_api2_gic.h"
 #include "isp/rk_aiq_isp_cac21.h"
 #include "uAPI2/rk_aiq_user_api2_cac.h"
-#include "isp/rk_aiq_isp_ldch22.h"
-#include "uAPI2/rk_aiq_user_api2_ldch.h"
 #include "isp/rk_aiq_isp_merge22.h"
 #include "uAPI2/rk_aiq_user_api2_merge.h"
 #include "isp/rk_aiq_isp_lsc21.h"

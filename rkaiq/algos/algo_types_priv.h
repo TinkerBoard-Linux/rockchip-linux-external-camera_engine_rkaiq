@@ -33,7 +33,6 @@
 #include "newStruct/gic/include/gic_algo_api.h"
 #include "newStruct/cac/include/cac_algo_api.h"
 // #include "newStruct/cac/include/lut_buffer.h"
-#include "newStruct/ldch/include/ldch_algo_api.h"
 #include "newStruct/csm/include/csm_algo_api.h"
 #include "newStruct/lsc/include/lsc_algo_api.h"
 #include "newStruct/merge/include/merge_algo_api.h"
@@ -45,13 +44,17 @@
 #include "newStruct/gain/include/gain_algo_api.h"
 #include "newStruct/ccm/include/ccm_algo_api.h"
 #ifdef ISP_HW_V39
-#include "newStruct/dehaze/include/dehaze_algo_api.h"
-#include "newStruct/rgbir/include/rgbir_algo_api.h"
-#include "newStruct/yme/include/yme_algo_api.h"
 #include "newStruct/3dlut/include/3dlut_algo_api.h"
+#include "newStruct/dehaze/include/dehaze_algo_api.h"
+#include "newStruct/ldc/include/ldc_algo_api.h"
+#include "newStruct/rgbir/include/rgbir_algo_api.h"
+#if RKAIQ_HAVE_YUVME
+#include "newStruct/yme/include/yme_algo_api.h"
+#endif
 #endif
 #ifdef ISP_HW_V33
 #include "newStruct/hsv/include/hsv_algo_api.h"
+#include "newStruct/ldc/include/ldc_algo_api.h"
 #endif
 #endif
 
@@ -277,7 +280,7 @@ typedef struct _RkAiqAlgoProcResAwb {
         rk_aiq_awb_stat_cfg_v200_t* awb_hw0_para;
         rk_aiq_awb_stat_cfg_v201_t* awb_hw1_para;
         rk_aiq_awb_stat_cfg_v32_t* awb_hw32_para;
-        awbStats_cfg_priv_t* awb_hw39_para;
+        awbStats_cfg_priv_t* awb_hw_cfg_priv;
     };
     bool awb_gain_update;
 #if RKAIQ_HAVE_AWB_V32|| RKAIQ_HAVE_AWB_V39
@@ -313,6 +316,12 @@ typedef struct rk_aiq_isp_drc_v39_s {
     float L2S_Ratio;
     unsigned char compr_bit;
 } rk_aiq_isp_drc_v39_t;
+
+typedef struct rk_aiq_isp_blc_v33_s {
+    blc_param_t blc_param;
+    bool *damping;
+    bool *aeIsConverged;
+} rk_aiq_isp_blc_v33_t;
 #endif
 
 typedef struct {
@@ -334,12 +343,23 @@ typedef struct {
 #endif
 } RkAiqAlgoProcResDrc;
 
+#define DRC_AE_HIST_BIN_NUM (256)
+typedef struct rkisp_adrc_stats_s {
+    uint32_t frame_id;
+    bool stats_true;
+    int ae_hist_total_num;
+    unsigned int aeHiatBins[DRC_AE_HIST_BIN_NUM];
+} rkisp_adrc_stats_t;
+
 typedef struct {
     RkAiqAlgoCom com;
     bool LongFrmMode;
     bool blc_ob_enable;
+    bool aeIsConverged;
     float isp_ob_predgain;
+    rkisp_adrc_stats_t drc_stats;
 #if USE_NEWSTRUCT
+    trans_params_static_t staTrans;
     FrameNumber_t FrameNumber;
     NextData_t NextData;
 #endif
@@ -380,6 +400,12 @@ typedef struct {
     RkAiqAlgoCom com;
     float blc_ob_predgain;
 } RkAiqAlgoProcCnr;
+
+typedef struct {
+    RkAiqAlgoCom com;
+    bool aeIsConverged;
+    bool ishdr;
+} RkAiqAlgoProcBlc;
 
 typedef struct {
     RkAiqAlgoResCom res_com;
@@ -434,9 +460,6 @@ typedef struct _RkAiqAlgoProcCac {
 
 typedef struct _RkAiqAlgoProcResLdch {
     RkAiqAlgoResCom res_com;
-#if USE_NEWSTRUCT
-    ldch_param_t* ldchRes;
-#endif
 } RkAiqAlgoProcResLdch;
 
 typedef struct _RkAiqAlgoConfigLdch {
@@ -446,6 +469,7 @@ typedef struct _RkAiqAlgoConfigLdch {
     bool is_multi_isp;
     uint8_t multi_isp_extended_pixel;
 } RkAiqAlgoConfigLdch;
+
 typedef struct _RkAiqAlgoProcResCsm {
     RkAiqAlgoResCom res_com;
 #if USE_NEWSTRUCT
@@ -518,13 +542,6 @@ typedef struct _RkAiqAlgoConfigGain {
 typedef struct {
     RkAiqAlgoCom com;
 } RkAiqAlgoProcGain;
-
-typedef struct {
-    RkAiqAlgoResCom res_com;
-#if USE_NEWSTRUCT
-    gain_param_t* gainRes;
-#endif
-} RkAiqAlgoProcResGain;
 
 typedef struct _RkAiqAlgoConfigAf {
     RkAiqAlgoCom com;
@@ -613,5 +630,20 @@ typedef struct {
     RkAiqAlgoCom com;
     illu_estm_info_t illu_info;
 } RkAiqAlgoProcLsc;
+
+#if USE_NEWSTRUCT
+// aldc
+typedef struct _RkAiqAlgoConfigLdc {
+    RkAiqAlgoCom com;
+    isp_drv_share_mem_ops_t* mem_ops;
+    bool is_multi_isp;
+    char iqpath[255];
+} RkAiqAlgoConfigLdc;
+
+typedef struct _RkAiqAlgoProcLdc {
+    RkAiqAlgoCom com;
+    AiqLdcUpdMeshMode upd_mesh_mode;
+} RkAiqAlgoProcLdc;
+#endif
 
 #endif

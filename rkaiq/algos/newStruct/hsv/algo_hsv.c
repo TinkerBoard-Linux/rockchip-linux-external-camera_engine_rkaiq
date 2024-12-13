@@ -26,6 +26,11 @@
 #include "interpolation.h"
 #include "c_base/aiq_base.h"
 
+#if RKAIQ_HAVE_DUMPSYS
+#include "include/algo_hsv_info.h"
+#include "rk_info_utils.h"
+#endif
+
 static int illu_estm_once(ahsv_param_illuLink_t* illuLinks, uint8_t illuLink_len, float awbGain[2]) {
     int ret = -1;
     uint8_t case_id = 0;
@@ -138,7 +143,7 @@ static void Damping(HsvContext_t* pHsvCtx, float damp)
     ahsv_param_static_t* sta = &hsv_calib->tunning.stAuto.sta;
 
     /* calc. damped lut */
-    if (sta->hsvCfg.hw_hsvT_lut0_en) {
+    if (sta->hsvCfg.hw_hsvT_lut1d0_en) {
         array_weight_sum(pDamped->lut0, pUndamped->lut0, f1, 
                          HSV_1DLUT_NUM, 7, &lutSum[0]);
         LOGD_AHSV("lut0: Damping %f, lutsum0 %d -> %d\n", 
@@ -149,7 +154,7 @@ static void Damping(HsvContext_t* pHsvCtx, float damp)
         LOGD_AHSV("lut1: Damping 0, lutsum0 %d -> %d\n", 
                   lutSum[0], pHsvCtx->pre_lutSum[0]);
     }
-    if (sta->hsvCfg.hw_hsvT_lut2_en) {
+    if (sta->hsvCfg.hw_hsvT_lut1d1_en) {
         array_weight_sum(pDamped->lut1, pUndamped->lut1, f1, 
                          HSV_1DLUT_NUM, 7, &lutSum[1]);
         LOGD_AHSV("lut1: Damping %f, lutsum1 %d -> %d\n", 
@@ -160,7 +165,7 @@ static void Damping(HsvContext_t* pHsvCtx, float damp)
         LOGD_AHSV("lut1: Damping 0, lutsum1 %d -> %d\n", 
                   lutSum[1], pHsvCtx->pre_lutSum[1]);
     }
-    if (sta->hsvCfg.hw_hsvT_lut2_en) {
+    if (sta->hsvCfg.hw_hsvT_lut2d_en) {
         array_weight_sum(pDamped->lut2, pUndamped->lut2, f1, 
                          HSV_2DLUT_NUM, 7, &lutSum[2]);
         LOGD_AHSV("lut2: Damping %f, lutsum2 %d -> %d\n", 
@@ -276,36 +281,36 @@ XCamReturn Ahsv_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
     if (need_recal || pHsvCtx->is_calib_update) {
         pHsvCtx->is_calib_update = false;
         LOGD_AHSV("HSV interpolate lut by alpha");
-        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut0_en)
-            interpolate_lut1d_alpha(alpha, &pHsvCtx->calib_lut->lut0, pHsvCtx->undamped_lut.lut0);
+        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut1d0_en)
+            interpolate_lut1d_alpha(alpha, &pHsvCtx->calib_lut->lut1d0, pHsvCtx->undamped_lut.lut0);
         else
             memcpy(pHsvCtx->undamped_lut.lut0, 
-                   pHsvCtx->calib_lut->lut0.hw_hsvT_lut1d_val,
-                   sizeof(pHsvCtx->calib_lut->lut0.hw_hsvT_lut1d_val));
-        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut1_en)
-            interpolate_lut1d_alpha(alpha, &pHsvCtx->calib_lut->lut1, pHsvCtx->undamped_lut.lut1);
+                   pHsvCtx->calib_lut->lut1d0.hw_hsvT_lut1d_val,
+                   sizeof(pHsvCtx->calib_lut->lut1d0.hw_hsvT_lut1d_val));
+        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut1d1_en)
+            interpolate_lut1d_alpha(alpha, &pHsvCtx->calib_lut->lut1d1, pHsvCtx->undamped_lut.lut1);
         else
             memcpy(pHsvCtx->undamped_lut.lut1, 
-                   pHsvCtx->calib_lut->lut1.hw_hsvT_lut1d_val,
-                   sizeof(pHsvCtx->calib_lut->lut1.hw_hsvT_lut1d_val));
-        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut2_en)
-            interpolate_lut2d_alpha(alpha, &pHsvCtx->calib_lut->lut2, pHsvCtx->undamped_lut.lut2);
+                   pHsvCtx->calib_lut->lut1d1.hw_hsvT_lut1d_val,
+                   sizeof(pHsvCtx->calib_lut->lut1d1.hw_hsvT_lut1d_val));
+        if (tunning->stAuto.sta.hsvCfg.hw_hsvT_lut2d_en)
+            interpolate_lut2d_alpha(alpha, &pHsvCtx->calib_lut->lut2d, pHsvCtx->undamped_lut.lut2);
         else
             memcpy(pHsvCtx->undamped_lut.lut2, 
-                   pHsvCtx->calib_lut->lut2.hw_hsvT_lut2d_val,
-                   sizeof(pHsvCtx->calib_lut->lut2.hw_hsvT_lut2d_val));
+                   pHsvCtx->calib_lut->lut2d.hw_hsvT_lut2d_val,
+                   sizeof(pHsvCtx->calib_lut->lut2d.hw_hsvT_lut2d_val));
     }
 
     //(4) damp
     bool mode_keep = 
-            (pHsvCtx->calib_lut->lut0.hw_hsvT_lut1d_mode == pHsvCtx->pre_mode[0]) &&
-            (pHsvCtx->calib_lut->lut1.hw_hsvT_lut1d_mode == pHsvCtx->pre_mode[1]) && 
-            (pHsvCtx->calib_lut->lut2.hw_hsvT_lut2d_mode == pHsvCtx->pre_mode[2]);
+            (pHsvCtx->calib_lut->lut1d0.hw_hsvT_lut1d_mode == pHsvCtx->pre_mode[0]) &&
+            (pHsvCtx->calib_lut->lut1d1.hw_hsvT_lut1d_mode == pHsvCtx->pre_mode[1]) && 
+            (pHsvCtx->calib_lut->lut2d.hw_hsvT_lut2d_mode == pHsvCtx->pre_mode[2]);
     
     if (!mode_keep) {
-        pHsvCtx->pre_mode[0] = pHsvCtx->calib_lut->lut0.hw_hsvT_lut1d_mode;
-        pHsvCtx->pre_mode[1] = pHsvCtx->calib_lut->lut1.hw_hsvT_lut1d_mode;
-        pHsvCtx->pre_mode[2] = pHsvCtx->calib_lut->lut2.hw_hsvT_lut2d_mode;
+        pHsvCtx->pre_mode[0] = pHsvCtx->calib_lut->lut1d0.hw_hsvT_lut1d_mode;
+        pHsvCtx->pre_mode[1] = pHsvCtx->calib_lut->lut1d1.hw_hsvT_lut1d_mode;
+        pHsvCtx->pre_mode[2] = pHsvCtx->calib_lut->lut2d.hw_hsvT_lut2d_mode;
     }
 
     bool damp_en = tunning->stAuto.sta.sw_hsvT_damp_en && mode_keep;
@@ -319,31 +324,31 @@ XCamReturn Ahsv_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
 
     outparams->cfg_update = false;
     hsv_param_t* hsvRes = outparams->algoRes;
-    if (isReCal_) {
-        hsvRes->dyn.lut0.hw_hsvT_lut1d_mode = pHsvCtx->calib_lut->lut0.hw_hsvT_lut1d_mode;
-        hsvRes->dyn.lut1.hw_hsvT_lut1d_mode = pHsvCtx->calib_lut->lut1.hw_hsvT_lut1d_mode;
-        hsvRes->dyn.lut2.hw_hsvT_lut2d_mode = pHsvCtx->calib_lut->lut2.hw_hsvT_lut2d_mode;
-    }
+
     if (need_recal) {
         hsvRes->sta = tunning->stAuto.sta.hsvCfg;
+        hsvRes->dyn.lut1d0.hw_hsvT_lut1d_mode = pHsvCtx->calib_lut->lut1d0.hw_hsvT_lut1d_mode;
+        hsvRes->dyn.lut1d1.hw_hsvT_lut1d_mode = pHsvCtx->calib_lut->lut1d1.hw_hsvT_lut1d_mode;
+        hsvRes->dyn.lut2d.hw_hsvT_lut2d_mode = pHsvCtx->calib_lut->lut2d.hw_hsvT_lut2d_mode;
+
         if (damp_en) {
-            memcpy(hsvRes->dyn.lut0.hw_hsvT_lut1d_val, 
+            memcpy(hsvRes->dyn.lut1d0.hw_hsvT_lut1d_val, 
                    pHsvCtx->damped_lut.lut0, 
                    sizeof(pHsvCtx->damped_lut.lut0));
-            memcpy(hsvRes->dyn.lut1.hw_hsvT_lut1d_val, 
+            memcpy(hsvRes->dyn.lut1d1.hw_hsvT_lut1d_val, 
                    pHsvCtx->damped_lut.lut1, 
                    sizeof(pHsvCtx->damped_lut.lut1));
-            memcpy(hsvRes->dyn.lut2.hw_hsvT_lut2d_val, 
+            memcpy(hsvRes->dyn.lut2d.hw_hsvT_lut2d_val, 
                    pHsvCtx->damped_lut.lut2, 
                    sizeof(pHsvCtx->damped_lut.lut2));
         } else {
-            memcpy(hsvRes->dyn.lut0.hw_hsvT_lut1d_val, 
+            memcpy(hsvRes->dyn.lut1d0.hw_hsvT_lut1d_val, 
                    pHsvCtx->undamped_lut.lut0, 
                    sizeof(pHsvCtx->undamped_lut.lut0));
-            memcpy(hsvRes->dyn.lut1.hw_hsvT_lut1d_val, 
+            memcpy(hsvRes->dyn.lut1d1.hw_hsvT_lut1d_val, 
                    pHsvCtx->undamped_lut.lut1, 
                    sizeof(pHsvCtx->undamped_lut.lut1));
-            memcpy(hsvRes->dyn.lut2.hw_hsvT_lut2d_val, 
+            memcpy(hsvRes->dyn.lut2d.hw_hsvT_lut2d_val, 
                    pHsvCtx->undamped_lut.lut2, 
                    sizeof(pHsvCtx->undamped_lut.lut2));
         }
@@ -355,6 +360,17 @@ XCamReturn Ahsv_processing(const RkAiqAlgoCom* inparams, RkAiqAlgoResCom* outpar
 
     return XCAM_RETURN_NO_ERROR;
 }
+
+#if RKAIQ_HAVE_DUMPSYS
+static int dump(const RkAiqAlgoCom* config, st_string* result)
+{
+    hsv_dump_mod_param(config, result);
+    hsv_dump_mod_attr(config, result);
+    hsv_dump_mod_status(config, result);
+
+    return 0;
+}
+#endif
 
 static XCamReturn
 create_context
@@ -510,6 +526,9 @@ RkAiqAlgoDescription g_RkIspAlgoDescHsv = {
     .pre_process = NULL,
     .processing = processing,
     .post_process = NULL,
+#if RKAIQ_HAVE_DUMPSYS
+    .dump = dump,
+#endif
 };
 
 //RKAIQ_END_DECLARE

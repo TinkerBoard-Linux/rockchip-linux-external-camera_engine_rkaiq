@@ -987,7 +987,7 @@ void Isp32Params::convertAiqAfLiteToIsp32Params(struct isp32_isp_params_cfg& isp
     } else {
         isp_cfg.meas.rawaf.ae_mode = 0;
         isp_cfg.meas.rawaf.ae_config_use = 1;
-        isp_cfg.meas.rawaf.ae_sel = 1;
+        isp_cfg.meas.rawaf.ae_sel = 0;
     }
 
     memcpy(isp_cfg.meas.rawaf.line_en, af_data.line_en,
@@ -1471,10 +1471,10 @@ void Isp32Params::convertAiqUvnrToIsp32Params(struct isp32_isp_params_cfg& isp_c
     bool enable = uvnr.cnr_en;
 
     isp_cfg.module_en_update |= ISP3X_MODULE_CNR;
-    isp_cfg.module_ens &=~ ISP3X_MODULE_CNR;
+    isp_cfg.module_ens |= ISP3X_MODULE_CNR;
 
 
-#if 0
+#if 1
 
     isp_cfg.module_cfg_update |= ISP3X_MODULE_CNR;
     struct isp32_cnr_cfg* pCnr = &isp_cfg.others.cnr_cfg;
@@ -2058,9 +2058,9 @@ void Isp32Params::convertAiqSharpenToIsp32Params(struct isp32_isp_params_cfg& is
     bool enable = sharp.sharp_en;
 
     isp_cfg.module_en_update |= ISP3X_MODULE_SHARP;
-    isp_cfg.module_ens &=~ ISP3X_MODULE_SHARP;
+    isp_cfg.module_ens |= ISP3X_MODULE_SHARP;
 
-#if 0
+#if 1
 
     isp_cfg.module_cfg_update |= ISP3X_MODULE_SHARP;
     struct isp32_sharp_cfg* pSharp = &isp_cfg.others.sharp_cfg;

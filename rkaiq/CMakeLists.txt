@@ -29,6 +29,7 @@ configure_file(
 
 set (GIT_LOG "")
 execute_process(COMMAND git log --oneline -n 5
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
 	TIMEOUT 5
 	OUTPUT_VARIABLE GIT_LOG)
 
@@ -58,6 +59,10 @@ if (RKAIQ_IMPLEMENT_C)
 	add_compile_options(-DUSE_IMPLEMENT_C=1)
 endif()
 
+if(RKAIQ_HAVE_DUMPSYS)
+    add_definitions(-DRKAIQ_HAVE_DUMPSYS=1)
+endif()
+
 find_package(librga QUIET)
 if (librga_FOUND)
     add_compile_options(${LIBRGA_CFLAGS})
@@ -76,7 +81,8 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMakeTargets")
 
 if(NOT RKAIQ_ENABLE_SIMULATOR)
-    if (RKAIQ_HAVE_LDC)
+    if (RKAIQ_HAVE_LDCH_V22)
+        set(RKAIQ_HAVE_LDC true)
         set(LDC_GENMESH_ONLINE true)
     else ()
         set(GENMESH_ONLINE true)
@@ -93,6 +99,16 @@ if (RKAIQ_IMPLEMENT_C)
 		aiq_core_c
 		hwi_c
 		)
+endif()
+
+if (RKAIQ_HAVE_DUMPSYS)
+    set (AIQ_DUMPSYS_INCLUEDE
+        hwi_c/info
+        aiq_core_c/info
+        dumpcam_server/include
+        dumpcam_server/info/include
+        dumpcam_server/ipcs/include
+        )
 endif()
 
 include_directories(
@@ -190,6 +206,7 @@ include_directories(
 	c_base
 	${AIQ_C_INCLUDE}
     ${PROJECT_BINARY_DIR}
+    ${AIQ_DUMPSYS_INCLUEDE}
     )
 
 if (RKAIQ_IMPLEMENT_C)
@@ -282,6 +299,12 @@ endif()
 if (RKAIQ_HAVE_LDCH)
     add_compile_options(-DRKAIQ_HAVE_LDCH=1)
 endif()
+if (RKAIQ_HAVE_LDCH_V22)
+    add_compile_options(-DRKAIQ_HAVE_LDCH_V22=1)
+endif()
+if (RKAIQ_HAVE_LDCV_V22)
+    add_compile_options(-DRKAIQ_HAVE_LDCV=1)
+endif()
 if (RKAIQ_HAVE_FEC)
     add_compile_options(-DRKAIQ_HAVE_FEC=1)
 endif()
@@ -363,6 +386,9 @@ if (RKAIQ_HAVE_AWB_V39)
     add_compile_options(-DRKAIQ_HAVE_AWB_V39=1)
     list(APPEND ALGO_HANDLE_SRC aiq_core/algo_handlers/RkAiqAwbV39Handle.cpp)
     list(APPEND ALGO_HANDLE_SRC aiq_core/algo_handlers/RkAiqCustomAwbHandle.cpp)
+    if (RKAIQ_HAVE_AWB_V33)
+        add_compile_options(-DRKAIQ_HAVE_AWB_V33=1)
+    endif()
 endif()
 if (RKAIQ_HAVE_GIC_V1 OR RKAIQ_HAVE_GIC_V2)
     if (RKAIQ_HAVE_GIC_V1)
@@ -780,8 +806,7 @@ if (RKAIQ_HAVE_LDCH_V21)
     endif()
 endif()
 
-if (RKAIQ_HAVE_LDC)
-    add_compile_options(-DRKAIQ_HAVE_LDC=1)
+if (RKAIQ_HAVE_LDCH_V22)
     list(APPEND ALGO_HANDLE_SRC aiq_core/algo_handlers/RkAiqAldcHandle.cpp)
 endif()
 
@@ -985,6 +1010,10 @@ set(COMMON_SRC
     common/code_to_pixel_format.c
     )
 
+if (RKAIQ_HAVE_DUMPSYS)
+    set (COMMON_SRC ${COMMON_SRC} common/aiq_notifier.c)
+endif()
+
 if (RKAIQ_NEWSTRUCT_TEST)
 set(MODULES_SRC
     modules/rk_aiq_isp32_modules.c
@@ -1179,6 +1208,25 @@ set (HWI_C_SRC
     hwi_c/aiq_dumpRkRaw.c
 )
 
+if (RKAIQ_HAVE_DUMPSYS)
+    set (HWI_C_SRC
+        ${HWI_C_SRC}
+        hwi_c/info/aiq_CamHwBaseInfo.c
+        hwi_c/info/aiq_sensorHwInfo.c
+        hwi_c/info/aiq_streamCapInfo.c
+        hwi_c/info/aiq_streamProcInfo.c
+        hwi_c/info/aiq_ispParamsCvtInfo.c
+        hwi_c/info/aiq_ispActiveParamsInfo.c
+        hwi_c/info/aiq_hwiIspModsInfo.c
+        aiq_core_c/info/aiq_coreInfo.c
+        aiq_core_c/info/aiq_coreBufMgrInfo.c
+        aiq_core_c/info/aiq_groupAnalyzerInfo.c
+        aiq_core_c/info/aiq_coreIspParamsInfo.c
+        aiq_core_c/info/aiq_coreIspModsInfo.c
+        aiq_core_c/info/aiq_coreAlgosInfo.c
+        )
+endif()
+
 if (RKAIQ_HAVE_PDAF)
     list(APPEND HWI_C_SRC hwi_c/aiq_PdafStreamProcUnit.c)
 endif()
@@ -1192,6 +1240,7 @@ if (RKAIQ_ISP_VERSION STREQUAL "33")
     list(APPEND HWI_C_SRC hwi_c/isp33/aiq_CamHwIsp33.c)
     list(APPEND HWI_C_SRC hwi_c/isp39/aiq_isp39ParamsCvt.c)
     list(APPEND HWI_C_SRC hwi_c/isp33/aiq_isp33ParamsCvt.c)
+    list(APPEND HWI_C_SRC hwi_c/isp33/aiq_isp33ParamsSplitter.c)
 endif()
 
 set (CORE_C_SRC
@@ -1267,6 +1316,14 @@ if (RKAIQ_HAVE_HSV)
         add_compile_options(-DRKAIQ_HAVE_HSV_V10=1)
     endif()
     list(APPEND CORE_C_SRC aiq_core_c/algo_handlers/RkAiqHsvHandler.c)
+endif()
+
+if (RKAIQ_HAVE_LDC)
+    add_compile_options(-DRKAIQ_HAVE_LDC=1)
+endif()
+
+if (RKAIQ_HAVE_LDCH_V22)
+    list(APPEND CORE_C_SRC aiq_core_c/algo_handlers/RkAiqLdcHandler.c)
 endif()
 
 if (RKAIQ_ENABLE_CAMGROUP)
@@ -1420,6 +1477,7 @@ link_directories("${LIBRARY_OUTPUT_PATH}" "${OPENCV_LIBS_DIR}" "${GENMESH_LIBS_D
 add_library(rkaiq_tmp STATIC ${RK_AIQ_SRC})
 set_target_properties(rkaiq_tmp PROPERTIES FOLDER "rk_aiq")
 set_target_properties(rkaiq_tmp PROPERTIES CLEAN_DIRECT_OUTPUT 1)
+#target_compile_options(rkaiq_tmp PRIVATE -DAIQ_MALLOC_DBG)
 add_dependencies(rkaiq_tmp j2s_parser)
 
 if (RKAIQ_BUILD_BINARY_IQ)
@@ -1430,11 +1488,16 @@ if (RKAIQ_J2S4B_DEV)
     add_dependencies(rkaiq_tmp j2s4b_dev)
 endif()
 
+if (RKAIQ_BUILD_IQBINFORRTT)
+    add_dependencies(rkaiq_tmp iqbin_for_rtt)
+endif()
+
 add_library(rkaiq SHARED ${RK_AIQ_SRC})
 set_target_properties(rkaiq PROPERTIES FOLDER "rk_aiq")
 set_target_properties(rkaiq PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 set_target_properties(rkaiq PROPERTIES C_VISIBILITY_PRESET default)
 set_target_properties(rkaiq PROPERTIES CXX_VISIBILITY_PRESET default)
+#target_compile_options(rkaiq PRIVATE -DAIQ_MALLOC_DBG)
 
 target_link_libraries(rkaiq
 	PRIVATE
@@ -2006,19 +2069,35 @@ if (RKAIQ_HAVE_LDCH_V10 OR RKAIQ_HAVE_LDCH_V21)
 endif()
 
 if (RKAIQ_HAVE_LDC)
-if (LDC_GENMESH_ONLINE)
-    set (LDC_GENMESH_LIBS rkAlgoGenMesh)
-    set (LDC_GENMESH_MAP_SEPARATE rkAlgoMapSeparate)
-	list(APPEND RK_AIQ_STATIC_LIB_ARS
-		${STATIC_LIB_PREFIX}rkAlgoMapSeparate${STATIC_LIB_SUFFIX})
+    if (LDC_GENMESH_ONLINE)
+        if (RKAIQ_HAVE_LDCV_V22)
+            set (LDC_GENMESH_MAP_SEPARATE rkAlgoMapSeparate)
+            list(APPEND RK_AIQ_STATIC_LIB_ARS
+                ${STATIC_LIB_PREFIX}rkAlgoMapSeparate${STATIC_LIB_SUFFIX})
+        endif()
+        list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}rkAlgoGenMesh${STATIC_LIB_SUFFIX})
+        set (LDC_GENMESH_LIBS rkAlgoGenMesh)
+    endif()
+    target_link_libraries(rkaiq
+        PRIVATE
+        rkaiq_aldc
+        ${LDC_GENMESH_LIBS}
+        ${LDC_GENMESH_MAP_SEPARATE}
+        )
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}rkaiq_aldc${STATIC_LIB_SUFFIX})
 endif()
-target_link_libraries(rkaiq
-    PRIVATE
-    rkaiq_aldc
-    ${LDC_GENMESH_LIBS}
-    ${LDC_GENMESH_MAP_SEPARATE}
-    )
-list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}rkaiq_aldc${STATIC_LIB_SUFFIX})
+
+if(RKAIQ_ISP_VERSION STREQUAL "33")
+    set(AUTOBLC_LIBS_DIR ${PROJECT_SOURCE_DIR}/modules/blc_algo)
+    file(COPY ${AUTOBLC_LIBS_DIR}/libautoblc.a	DESTINATION ${LIBRARY_OUTPUT_PATH})
+
+    add_library(autoblc STATIC IMPORTED GLOBAL)
+    set_target_properties(autoblc PROPERTIES IMPORTED_LOCATION 	"${LIBRARY_OUTPUT_PATH}/libautoblc.a")
+    set_target_properties(autoblc PROPERTIES IMPORTED_IMPLIB 	    "${LIBRARY_OUTPUT_PATH}/libautoblc.a")
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}autoblc${STATIC_LIB_SUFFIX})
+    set (AUTOBLC_LIBS autoblc)
+
+    target_link_libraries(rkaiq PRIVATE ${AUTOBLC_LIBS})
 endif()
 
 if (RKAIQ_HAVE_FEC_V10)
@@ -2217,6 +2296,29 @@ if (libdrm_FOUND)
         )
 endif()
 
+if(RKAIQ_HAVE_DUMPSYS)
+    add_subdirectory(tools/dumpcam)
+
+    include_directories(dumpcam_server/include)
+    include_directories(dumpcam_server/info/include)
+    include_directories(dumpcam_server/ipcs/include)
+
+    set(AIQ_DUMPCAM_SERVER_STATIC   "rkaiq_dumpcam_server")
+    set(AIQ_IPCS_STATIC             "rkaiq_ipcs")
+    set(AIQ_INFO_STATIC             "rkaiq_info")
+    set(LIB_STATIC_CJSON            "rkaiq_cjson")
+    set(LIB_STATIC_ARGPARSE         "rkaiq_argparse")
+
+    add_subdirectory(dumpcam_server)
+    target_link_libraries(rkaiq PRIVATE ${AIQ_DUMPCAM_SERVER_STATIC})
+
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}${AIQ_DUMPCAM_SERVER_STATIC}${STATIC_LIB_SUFFIX})
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}${AIQ_IPCS_STATIC}${STATIC_LIB_SUFFIX})
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}${AIQ_INFO_STATIC}${STATIC_LIB_SUFFIX})
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}${LIB_STATIC_CJSON}${STATIC_LIB_SUFFIX})
+    list(APPEND RK_AIQ_STATIC_LIB_ARS ${STATIC_LIB_PREFIX}${LIB_STATIC_ARGPARSE}${STATIC_LIB_SUFFIX})
+endif()
+
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Android")
     target_link_libraries(rkaiq
         PRIVATE
@@ -2276,3 +2378,7 @@ endif()
 install(TARGETS rkaiq
     LIBRARY DESTINATION lib)
 install(FILES ${CMAKE_LIBRARY_PATH}/librkaiq.a DESTINATION lib)
+
+# if (RKAIQ_ISP_VERSION STREQUAL "33")
+#     install(FILES modules/blc_algo/libautoblc.so DESTINATION lib)
+# endif()

@@ -35,7 +35,7 @@
 typedef struct rk_aiq_singlecam_3a_result_s {
     uint8_t _camId;
     uint32_t _frameId;
-    int16_t hdrIso;
+    int hdrIso;
     // ae params
     struct {
         RKAiqAecExpInfo_t* exp_tbl;
@@ -105,6 +105,9 @@ typedef struct rk_aiq_singlecam_3a_result_s {
 #if RKAIQ_HAVE_RGBIR_REMOSAIC
     rgbir_param_t* rgbir;
 #endif
+#if RKAIQ_HAVE_HSV
+    hsv_param_t* _hsv;
+#endif
 #if RKAIQ_HAVE_3DLUT
     lut3d_param_t *lut3d;
 #endif
@@ -133,7 +136,7 @@ typedef struct rk_aiq_singlecam_3a_result_s {
             rk_aiq_isp_blc_v21_t * _blcConfig;
             rk_aiq_isp_blc_v32_t * _blcConfig_v32;
 #if USE_NEWSTRUCT
-            blc_param_t* blc;
+            rk_aiq_isp_blc_v33_t* blc;
 #endif
         };
     } ablc;

@@ -82,8 +82,10 @@ void bayertnr_logtrans_init(int bayertnr_trans_mode, int bayertnr_trans_mode_sca
             pTransPrarms->bayertnr_logtablef[i] = 1 * bayertnr_logtblmul;
             pTransPrarms->bayertnr_logtablei[i] = 2 * bayertnr_logtblmul;
         }
+        LOGI_ANR("log domain\n");
     }
 
+    LOGI_ANR("oyyf log demoain init: mode:%d scale%d\n", bayertnr_trans_mode, bayertnr_trans_mode_scale);
     pTransPrarms->bayertnr_logprecision = bayertnr_logprecision;
     pTransPrarms->bayertnr_logfixbit = bayertnr_logfixbit;
     pTransPrarms->bayertnr_logtblbit = bayertnr_logtblbit;
@@ -140,6 +142,7 @@ int bayertnr_logtrans(uint32_t tmpfix, btnr_trans_params_t *pTransPrarms)
     }
     else
     {
+
         x8 = MIN((tmpfix + pTransPrarms->transf_mode_offset), pTransPrarms->transf_data_max_limit);
 
         // find highest bit
@@ -166,9 +169,100 @@ int bayertnr_logtrans(uint32_t tmpfix, btnr_trans_params_t *pTransPrarms)
         fx = fx >> (bayertnr_logfixbit + bayertnr_logtblbit - bayertnr_logscalebit);
 
         fx = fx - pTransPrarms->itransf_mode_offset;
+
     }
 
     return (int)fx;
+}
+
+int bayertnr_logiitrans(int tmpData, btnr_trans_params_t *pTransPrarms)
+{
+    long long iii, ss, n, dn, s;
+    long long one = 1;
+	long long ix1, ix2, dp;
+	long long lt1, lt2, fx;
+	long long stepbit, step, yy;
+    long long  tempdat;
+    int bayertnr_logprecision = pTransPrarms->bayertnr_logprecision;
+    int bayertnr_logfixbit = pTransPrarms->bayertnr_logfixbit;
+    int bayertnr_logtblbit = pTransPrarms->bayertnr_logtblbit;
+    int bayertnr_logscalebit = pTransPrarms->bayertnr_logscalebit;
+    int bayertnr_logfixmul = pTransPrarms->bayertnr_logfixmul;
+    int bayertnr_logtblmul = pTransPrarms->bayertnr_logtblmul;
+    uint16_t bayertnr_trans_mode_offset = pTransPrarms->transf_mode_offset;
+    uint16_t bayertnr_itrans_mode_offset = pTransPrarms->itransf_mode_offset;
+    uint8_t bayertnr_trans_mode = pTransPrarms->transf_mode;
+    uint32_t bayertnr_trans_data_max = pTransPrarms->transf_data_max_limit;
+
+	if(bayertnr_trans_mode)
+	{
+		fx = tmpData;
+		fx = fx + bayertnr_itrans_mode_offset;
+
+		n  = (long long)bayertnr_find_top_one_pos((int)fx);
+		dn = n - bayertnr_logscalebit;
+
+		s = fx - (one<<(bayertnr_logscalebit+dn));
+		s = s*bayertnr_logtblmul/(one<<(bayertnr_logscalebit+dn));
+		stepbit = bayertnr_logtblbit - bayertnr_logprecision;
+		step = (one<<stepbit);
+
+		ix1 = s/step;
+		dp = s - ix1*step;
+
+		ix2 = ix1 + 1;
+
+		lt1 = pTransPrarms->bayertnr_logtablei[ix1];
+		lt2 = pTransPrarms->bayertnr_logtablei[ix2];
+
+		ss = lt1*(step - dp) + lt2*dp;
+
+		ss = ss+(one<<(bayertnr_logtblbit+stepbit-dn*2-1));
+		yy = ss>>(bayertnr_logtblbit+stepbit-dn*2);
+		yy = yy - bayertnr_trans_mode_offset;
+		tempdat = MIN(yy, bayertnr_trans_data_max);
+	}
+	else
+	{
+		fx = tmpData;
+		fx = fx + bayertnr_itrans_mode_offset;
+
+		iii = fx / (one<<bayertnr_logscalebit);
+		ss = fx - iii*(one<<bayertnr_logscalebit);
+
+		stepbit = bayertnr_logscalebit - bayertnr_logprecision;
+		step = (one<<stepbit);
+
+		ix1 = ss/step;
+		dp = ss - ix1*step;
+
+		ix2 = ix1 + 1;
+
+		lt1 = pTransPrarms->bayertnr_logtablei[ix1];
+		lt2 = pTransPrarms->bayertnr_logtablei[ix2];
+
+		ss = lt1*(step - dp) + lt2*dp;
+
+		yy = (one<<iii)*ss;
+		yy = yy/(one<<(bayertnr_logtblbit+stepbit));
+		yy = yy - bayertnr_trans_mode_offset;
+        tempdat = MIN(yy, bayertnr_trans_data_max);
+    }
+    return (int)tempdat;
+}
+
+int rk_autoblc_gen_tbl(unsigned int* bayertnr_itransf_tbl, uint16_t bayertnr_pixlog_max, btnr_trans_params_t *pTransPrarms)
+{
+
+	for (int j = 0; j <= bayertnr_pixlog_max; j++)
+	{
+		bayertnr_itransf_tbl[j] = pTransPrarms->isTransfBypass == 0 ? bayertnr_logiitrans(j, pTransPrarms) : j;
+	}
+	for (int j = bayertnr_pixlog_max + 1; j < 4096; j++)
+	{
+		bayertnr_itransf_tbl[j] = pTransPrarms->isTransfBypass == 0 ? bayertnr_logiitrans(bayertnr_pixlog_max, pTransPrarms) : j;
+	}
+	return 0;
 }
 
 void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
@@ -187,7 +281,7 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
         btnr_stats_t *btnr_stats = &pBtnrInfo->mBtnrStats[min_idx];
         btnr_stats->id = stats->frame_id;
         btnr_stats->sigma_num = stats->stat.bay3d.tnr_auto_sigma_count;
-        for (uint8_t i=0; i<20; i++) {
+        for (uint8_t i = 0; i < 20; i++) {
             btnr_stats->sigma_y[i] = stats->stat.bay3d.tnr_auto_sigma_calc[i];
         }
     }
@@ -203,9 +297,32 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
             btnr_stats_t *btnr_stats = &pBtnrInfo->mBtnrStats[min_idx];
             btnr_stats->id = stats->frame_id;
             btnr_stats->sigma_num = stats->stat.bay3d.sigma_num;
-            for (uint8_t i=0; i<20; i++) {
+            for (uint8_t i = 0; i < 20; i++) {
                 btnr_stats->sigma_y[i] = stats->stat.bay3d.sigma_y[i];
             }
+#if 0
+            printf("btnr sigma stats [%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
+                   btnr_stats->sigma_y[0],
+                   btnr_stats->sigma_y[1],
+                   btnr_stats->sigma_y[2],
+                   btnr_stats->sigma_y[3],
+                   btnr_stats->sigma_y[4],
+                   btnr_stats->sigma_y[5],
+                   btnr_stats->sigma_y[6],
+                   btnr_stats->sigma_y[7],
+                   btnr_stats->sigma_y[8],
+                   btnr_stats->sigma_y[9],
+                   btnr_stats->sigma_y[10],
+                   btnr_stats->sigma_y[11],
+                   btnr_stats->sigma_y[12],
+                   btnr_stats->sigma_y[13],
+                   btnr_stats->sigma_y[14],
+                   btnr_stats->sigma_y[15],
+                   btnr_stats->sigma_y[16],
+                   btnr_stats->sigma_y[17],
+                   btnr_stats->sigma_y[18],
+                   btnr_stats->sigma_y[19]);
+#endif
         }
     }
 #endif
@@ -221,7 +338,7 @@ void bayertnr_save_stats(void *stats_buffer, btnr_cvt_info_t *pBtnrInfo)
             }
             sharp_stats_t *sharp_stats = &pBtnrInfo->mSharpStats[min_idx];
             sharp_stats->id = stats->frame_id;
-            for (uint8_t i=0; i<17; i++) {
+            for (uint8_t i = 0; i < 17; i++) {
                 sharp_stats->noise_curve[i] = stats->stat.sharp.noise_curve[i];
             }
         }
@@ -389,7 +506,7 @@ void bay_gauss5x5_filter_coeff(float sigma, int halftaby, int halftabx, int strd
     }
 }
 
-int bayertnr_autosigma_config(btnr_stats_t *pStats, btnr_trans_params_t *pTransPrarms)
+int bayertnr_autosigma_config(btnr_stats_t *pStats, btnr_trans_params_t *pTransPrarms, blc_res_cvt_t* pBlc)
 {
     // update auto sigma curve
     int sigma_bins = 20;
@@ -439,7 +556,6 @@ int bayertnr_autosigma_config(btnr_stats_t *pStats, btnr_trans_params_t *pTransP
             }
             sigmay_tmp[j] = sigmay_tmp[tmp0];
             if(i >= sigma_bins) {
-                LOGW_ANR("sigmay_curve no point use!");
                 pTransPrarms->bayertnr_auto_sig_count_valid = 0;
                 break;
             }
@@ -447,51 +563,87 @@ int bayertnr_autosigma_config(btnr_stats_t *pStats, btnr_trans_params_t *pTransP
     }
 
     // sigma iir
-    for (j = 1; j < sigma_bins; j++)
-    {
-        sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+    if(pBlc->obcPostTnr.sw_blcT_obcPostTnr_en && pBlc->obcPostTnr.sw_blcT_autoOB_offset) {
+        for (j = 2; j < sigma_bins; j++)
+        {
+            sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+        }
+    } else {
+        for (j = 1; j < sigma_bins; j++)
+        {
+            sigmay_tmp[j] = MAX(sigmay_tmp[j], sigmay_tmp[j - 1]);
+        }
     }
 
     if(pStats->sigma_num < pTransPrarms->bayertnr_auto_sig_count_max)
     {
-        LOGW_ANR("sigma_curve capture 0x%x point not enough, sigma_cout_max:0x%x !\n",
-                 pStats->sigma_num, pTransPrarms->bayertnr_auto_sig_count_max);
         pTransPrarms->bayertnr_auto_sig_count_valid = 0;
     }
     else
         pTransPrarms->bayertnr_auto_sig_count_valid = 1;
 
-    if(pTransPrarms->bayertnr_auto_sig_count_valid == 0)
+    if(pTransPrarms->bayertnr_auto_sig_count_valid == 0) {
         iir_wgt = 1024;
+    }
+
+    LOGD_ANR("btnr num:%d num_thred:%d auto_valid:%d,iir_wgt:%d\n",
+             pStats->sigma_num,
+             pTransPrarms->bayertnr_auto_sig_count_max,
+             pTransPrarms->bayertnr_auto_sig_count_valid,
+             iir_wgt);
+
     for (j = 0; j < sigma_bins; j++)
     {
         tmp = (iir_wgt * sigmay_curve[j] + (1024 - iir_wgt) * sigmay_tmp[j]) >> 10;
         sigmay_curve[j] = tmp;
     }
 
-    /*
-    printf("sigmay_curve [%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
-            sigmay_curve[0],
-            sigmay_curve[1],
-            sigmay_curve[2],
-            sigmay_curve[3],
-            sigmay_curve[4],
-            sigmay_curve[5],
-            sigmay_curve[6],
-            sigmay_curve[7],
-            sigmay_curve[8],
-            sigmay_curve[9],
-            sigmay_curve[10],
-            sigmay_curve[11],
-            sigmay_curve[12],
-            sigmay_curve[13],
-            sigmay_curve[14],
-            sigmay_curve[15],
-            sigmay_curve[16],
-            sigmay_curve[17],
-            sigmay_curve[18],
-            sigmay_curve[19]);
-    */
+#if 0
+    printf("btnr sigmay_tmp[%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
+           sigmay_tmp[0],
+           sigmay_tmp[1],
+           sigmay_tmp[2],
+           sigmay_tmp[3],
+           sigmay_tmp[4],
+           sigmay_tmp[5],
+           sigmay_tmp[6],
+           sigmay_tmp[7],
+           sigmay_tmp[8],
+           sigmay_tmp[9],
+           sigmay_tmp[10],
+           sigmay_tmp[11],
+           sigmay_tmp[12],
+           sigmay_tmp[13],
+           sigmay_tmp[14],
+           sigmay_tmp[15],
+           sigmay_tmp[16],
+           sigmay_tmp[17],
+           sigmay_tmp[18],
+           sigmay_tmp[19]);
+
+    printf("btnr sigmay_curve iir finnal [%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d]\n",
+           sigmay_curve[0],
+           sigmay_curve[1],
+           sigmay_curve[2],
+           sigmay_curve[3],
+           sigmay_curve[4],
+           sigmay_curve[5],
+           sigmay_curve[6],
+           sigmay_curve[7],
+           sigmay_curve[8],
+           sigmay_curve[9],
+           sigmay_curve[10],
+           sigmay_curve[11],
+           sigmay_curve[12],
+           sigmay_curve[13],
+           sigmay_curve[14],
+           sigmay_curve[15],
+           sigmay_curve[16],
+           sigmay_curve[17],
+           sigmay_curve[18],
+           sigmay_curve[19]);
+#endif
+
     return 0;
 }
 

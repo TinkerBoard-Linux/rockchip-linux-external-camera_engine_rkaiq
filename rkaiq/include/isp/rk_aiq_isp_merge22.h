@@ -42,8 +42,8 @@ typedef struct mge_expRat_s {
         M4_TYPE(f32),
         M4_SIZE_EX(1,1),
         M4_RANGE_EX(1.0, 256),
-        M4_DEFAULT(16.0),
-        M4_DIGIT_EX(1f4b),
+        M4_DEFAULT(1.0),
+        M4_DIGIT_EX(2f4b),
         M4_HIDE_EX(0),
         M4_RO(0),
         M4_ORDER(0),
@@ -291,6 +291,19 @@ typedef struct mge_mdWgt_baseHdrS_s {
         Freq of use: high))  */
     // reg: hw_hdrmge_msAbsDiffThred_minLimit
     float hw_mgeT_wgtZero_thred;
+    /* M4_GENERIC_DESC(
+    M4_ALIAS(sw_mgeT_lumaDiff_scale),
+    M4_TYPE(f32),
+    M4_SIZE_EX(1,1),
+    M4_RANGE_EX(0,64),
+    M4_DEFAULT(1),
+    M4_DIGIT_EX(2),
+    M4_HIDE_EX(0),
+    M4_RO(0),
+    M4_ORDER(0),
+    M4_NOTES(The scale value of calculating move detection. The higher the value, the easier it
+   is to distinguish the moving zone. \n Freq of use: low))  */
+    float sw_mgeT_lumaDiff_scale;
 } mge_mdWgt_baseHdrS_t;
 
 typedef enum mge_baseFrm_mode_e {

@@ -77,6 +77,7 @@ typedef struct rk_aiq_tx_info_s {
 #define VIPCAP_TX_BUF_NUM_1608 6  // For mount 3 sensor, is mount 4 sensor, is 7
 
 typedef struct {
+    char driver[16];
     int model_idx;
     int logic_id;
     int phy_id;  // physical isp id
@@ -91,6 +92,7 @@ typedef struct {
     char mpfbc_dev_path[DEV_PATH_LEN];
     char main_path[DEV_PATH_LEN];
     char self_path[DEV_PATH_LEN];
+    char ldc_path[DEV_PATH_LEN];
     char rawwr0_path[DEV_PATH_LEN];
     char rawwr1_path[DEV_PATH_LEN];
     char rawwr2_path[DEV_PATH_LEN];

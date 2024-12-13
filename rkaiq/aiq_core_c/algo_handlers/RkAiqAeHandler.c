@@ -20,6 +20,7 @@
 #include "RkAiqGlobalParamsManager_c.h"
 #include "RkAiqMergeHandler.h"
 #include "RkAiqDrcHandler.h"
+#include "RkAiqBlcHandler.h"
 #include "RkAiqAfdHandler.h"
 #include "RkAiqAfHandler.h"
 #include "rk_aiq_uapi_ae_int.h"
@@ -60,6 +61,7 @@ static void _handlerAe_init(AiqAlgoHandler_t* pHdl) {
 
     pAeHdl->mAmerge_handle = pHdl->mAiqCore->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_AMERGE];
     pAeHdl->mAdrc_handle = pHdl->mAiqCore->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_ADRC];
+    pAeHdl->mAblc_handle = pHdl->mAiqCore->mAlgoHandleMaps[RK_AIQ_ALGO_TYPE_ABLC];
 
     EXIT_ANALYZER_FUNCTION();
 }
@@ -91,8 +93,10 @@ static XCamReturn _handlerAe_prepare(AiqAlgoHandler_t* pAlgoHandler) {
     ae_config_int->compr_bit = sharedCom->snsDes.compr_bit;
     ae_config_int->dcg_ratio = sharedCom->snsDes.dcg_ratio;
 
+    aiqMutex_lock(&pAlgoHandler->mCfgMutex);
     RkAiqAlgoDescription* des = (RkAiqAlgoDescription*)pAlgoHandler->mDes;
     ret                       = des->prepare(pAlgoHandler->mConfig);
+    aiqMutex_unlock(&pAlgoHandler->mCfgMutex);
     RKAIQCORE_CHECK_RET(ret, "ae algo prepare failed");
 
     EXIT_ANALYZER_FUNCTION();
@@ -133,8 +137,13 @@ static XCamReturn _handlerAe_preProcess(AiqAlgoHandler_t* pAlgoHandler) {
     if (algoId == 0) {
         AiqPoolItem_t* pItem =
             aiqPool_getFree(pAlgoHandler->mAiqCore->mPreResAeSharedPool);
-        if (pItem)
+        if (pItem) {
             pAeHdl->mPreResShared = (AlgoRstShared_t*)pItem->_pData;
+        } else {
+#if RKAIQ_HAVE_DUMPSYS
+            pAlgoHandler->mAiqCore->mNoFreeBufCnt.aePreRes++;
+#endif
+        }
     }
 
     if (!pAeHdl->mPreResShared) {
@@ -315,6 +324,21 @@ static XCamReturn _handlerAe_processing(AiqAlgoHandler_t* pAlgoHandler) {
             measGroupshared->frameId                 = shared->frameId;
         }
 
+        int hdr_iso[3] = {0};
+        if (pAlgoHandler->mAiqCore->mAlogsComSharedParams.hdr_mode == 0) {
+            hdr_iso[0] = 50 *
+                            ae_proc_res_int->new_ae_exp->LinearExp.exp_real_params.analog_gain *
+                            ae_proc_res_int->new_ae_exp->LinearExp.exp_real_params.digital_gain *
+                            ae_proc_res_int->new_ae_exp->LinearExp.exp_real_params.isp_dgain;
+        } else {
+            for(int i = 0; i < 3; i++) {
+                hdr_iso[i] = 50 *
+                                ae_proc_res_int->new_ae_exp->HdrExp[i].exp_real_params.analog_gain *
+                                ae_proc_res_int->new_ae_exp->HdrExp[i].exp_real_params.digital_gain *
+                                ae_proc_res_int->new_ae_exp->HdrExp[i].exp_real_params.isp_dgain;
+            }
+        }
+
         /* Transfer the initial exposure to other algorithm modules */
         RkAiqAlgosGroupShared_t* grpShared = NULL;
         for (int type = RK_AIQ_CORE_ANALYZE_MEAS; type < RK_AIQ_CORE_ANALYZE_MAX; \
@@ -324,6 +348,7 @@ static XCamReturn _handlerAe_processing(AiqAlgoHandler_t* pAlgoHandler) {
                 grpShared->preExp = *ae_proc_res_int->new_ae_exp;
                 grpShared->curExp = *ae_proc_res_int->new_ae_exp;
                 grpShared->nxtExp = *ae_proc_res_int->new_ae_exp;
+                grpShared->iso    = hdr_iso[0];
             }
 
         }
@@ -359,6 +384,11 @@ static XCamReturn _handlerAe_processing(AiqAlgoHandler_t* pAlgoHandler) {
     if (pAeHdl->mAdrc_handle) {
         AiqDrcHandler_t* Drc_algo = (AiqDrcHandler_t*)(pAeHdl->mAdrc_handle);
         AiqDrcHandler_setAeProcRes(Drc_algo, &aeProcResShared);
+    }
+
+    if (pAeHdl->mAblc_handle) {
+        AiqAlgoHandlerBlc_t* Blc_algo = (AiqAlgoHandlerBlc_t*)(pAeHdl->mAblc_handle);
+        AiqBlcHandler_setAeProcRes(Blc_algo, &aeProcResShared);
     }
 
     AiqStatsTranslator_t* translator = pAlgoHandler->mAiqCore->mTranslator;
@@ -415,7 +445,7 @@ static XCamReturn _handlerAe_genIspResult(AiqAlgoHandler_t* pAlgoHandler, AiqFul
     rk_aiq_isp_ae_stats_cfg_t* ae_stats_cfg   = (rk_aiq_isp_ae_stats_cfg_t*)pBase->_data;
     // TODO: Why need to copy again?
     //ae_stats_cfg->result = *ae_proc->ae_stats_cfg;
-    memcpy(ae_stats_cfg, ae_proc->ae_stats_cfg, sizeof(*ae_stats_cfg));
+    // memcpy(ae_stats_cfg, ae_proc->ae_stats_cfg, sizeof(*ae_stats_cfg));
     if (sharedCom->init) {
         pBase->frame_id  = 0;
     } else {
